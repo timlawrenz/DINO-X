@@ -9,7 +9,13 @@ Before looking at data, we must prove the Strix Halo can actually run the math.
 - [ ] **ROCm 7.1 Installation**: Install the gfx1151 specific drivers and libraries (miopen-hip, rccl).
 - [ ] **Flash Attention Compilation**: Compile Flash Attention 2 using the Triton backend.
 
-**Success Criteria**: Run a simple Python script that performs a Dot-Product Attention on a 512x512 matrix and doesn't crash.
+**Implementation links (OpenSpec + docs):**
+- OpenSpec change: `openspec/changes/add-phase1-platform-bootstrap/proposal.md`
+- Tasks checklist: `openspec/changes/add-phase1-platform-bootstrap/tasks.md`
+- Setup guide: `docs/hardware_setup.md`
+- Validation script: `scripts/phase1_validate_attention.py`
+
+**Success Criteria**: Run `scripts/phase1_validate_attention.py` to perform Dot-Product Attention on a 512x512 matrix and confirm it doesn't crash (prints `ok=true`).
 
 ## Phase 2: The Data (Fuel)
 
