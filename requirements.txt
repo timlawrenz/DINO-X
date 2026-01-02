@@ -1,0 +1,4 @@
+# Fully pinned environment snapshot (generated from .venv).
+# Regenerate with:
+#   .venv/bin/python -m pip freeze --all | LC_ALL=C sort > requirements.txt
+pip==25.1.1

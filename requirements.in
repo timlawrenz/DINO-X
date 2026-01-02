@@ -1,0 +1,9 @@
+# Minimal, reproducible Python dependencies for DINO-X.
+#
+# Notes:
+# - Prefer generating a fully-pinned requirements.txt from this file via pip-tools
+#   (or by installing and re-freezing inside .venv).
+# - Keep this list small; add packages as they are introduced into src/scripts.
+
+# Placeholder (Phase 1 adds no runtime deps beyond torch, installed per ROCm setup).
+# torch
