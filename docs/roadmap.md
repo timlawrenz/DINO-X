@@ -60,10 +60,10 @@ Do not start the main training yet. We need to prove the code works on a tiny sc
 
 Flying blind for 15 days is dangerous. We need instruments.
 
-- [ ] **Build the Monitor**: Write a script that runs safely alongside training (e.g., every 24h) to:
+- [x] **Build the Monitor**: Write a script that runs safely alongside training (e.g., every 24h) to:
   - Generate an Attention Map visualization of a fixed test image.
   - Calculate the Standard Deviation of embeddings (to detect collapse).
-- [ ] **Define Validation Set**: Isolate 10% of the data now so it never leaks into the training set.
+- [x] **Define Validation Set**: Isolate 10% of the data now so it never leaks into the training set.
 
 **Implementation links (OpenSpec + docs):**
 - OpenSpec change: `openspec/changes/add-phase4-instrumentation-navigation/proposal.md`
