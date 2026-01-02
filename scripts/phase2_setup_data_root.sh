@@ -10,7 +10,7 @@ DINOX_DATA_ROOT="${DINOX_DATA_ROOT:-/mnt/nas-ai-models/training-data/dino-x}"
 LIDC_ROOT="$DINOX_DATA_ROOT/lidc-idri"
 
 RAW_TARGET="$LIDC_ROOT/raw"
-PROC_TARGET="$LIDC_ROOT/processed-2p5d-rgb"
+PROC_TARGET="$LIDC_ROOT/processed-hu16"
 RUNS_TARGET="$DINOX_DATA_ROOT/runs"
 
 mkdir -p "$DATA_DIR"

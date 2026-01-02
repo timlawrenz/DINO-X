@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Phase 2 preprocessing: LIDC-IDRI DICOM -> 2.5D RGB PNG.
+"""Phase 2 preprocessing: LIDC-IDRI DICOM -> 16-bit HU PNG slices.
 
-Default output encoding is a *hybrid* 2.5D+windowing representation:
-- R channel: slice i-1 windowed with Lung settings
-- G channel: slice i windowed with Soft-Tissue settings
-- B channel: slice i+1 windowed with Bone settings
+Output encoding is **raw Hounsfield Units (HU)** stored as 16-bit lossless PNG
+(one file per axial slice). We intentionally avoid baking fixed CT windows here;
+windowing (including *random windowing*) is applied during training (Phase 3+).
 
-This satisfies both:
-- "3 depth slices per image" (2.5D)
-- "Lung/Soft-Tissue/Bone" windowing (RGB)
+Storage mapping (HU -> uint16 PNG):
+- Clip HU to a reasonable CT range.
+- Add an integer offset so values are non-negative.
 
 For development without the real dataset, use --dry-run to generate a synthetic volume.
 """
@@ -40,11 +39,9 @@ except Exception:  # pragma: no cover
     _need("pillow")
 
 
-Window = tuple[float, float]  # (center, width)
-
-LUNG: Window = (-600.0, 1500.0)
-SOFT: Window = (40.0, 400.0)
-BONE: Window = (300.0, 1500.0)
+HU_CLIP_LO = -1000.0
+HU_CLIP_HI = 4000.0
+HU_OFFSET = 32768
 
 
 @dataclass(frozen=True)
@@ -54,17 +51,16 @@ class SliceKey:
     path: Path
 
 
-def window_to_u8(img_hu: "np.ndarray", center: float, width: float) -> "np.ndarray":
-    lo = center - width / 2.0
-    hi = center + width / 2.0
-    x = np.clip(img_hu, lo, hi)
-    x = (x - lo) / (hi - lo + 1e-8)
-    return (x * 255.0).astype(np.uint8)
+def hu_to_u16(img_hu: "np.ndarray") -> "np.ndarray":
+    x = np.clip(img_hu, HU_CLIP_LO, HU_CLIP_HI)
+    x = np.rint(x + float(HU_OFFSET))
+    return x.astype(np.uint16)
 
 
-def save_rgb(rgb: "np.ndarray", out_path: Path) -> None:
+def save_slice_16bit(hu_slice: "np.ndarray", out_path: Path) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(rgb, mode="RGB").save(out_path)
+    u16 = hu_to_u16(hu_slice)
+    Image.fromarray(u16, mode="I;16").save(out_path, format="PNG")
 
 
 def _load_dicom_series(series_dir: Path) -> "np.ndarray":
@@ -231,21 +227,16 @@ def _write_volume(
     writer: "csv.writer",
     series_dir: Optional[Path] = None,
 ) -> None:
-    # Hybrid encoding: (lung i-1, soft i, bone i+1)
-    for i in range(1, vol.shape[0] - 1):
-        r = window_to_u8(vol[i - 1], *LUNG)
-        g = window_to_u8(vol[i], *SOFT)
-        b = window_to_u8(vol[i + 1], *BONE)
-        rgb = np.stack([r, g, b], axis=-1)
-
+    # Raw HU slices: one 16-bit grayscale PNG per axial slice.
+    for i in range(vol.shape[0]):
         out_path = out_root / "lidc-idri" / series_name / f"slice_{i:04d}.png"
-        save_rgb(rgb, out_path)
+        save_slice_16bit(vol[i], out_path)
 
         writer.writerow([
             str(out_path),
             str(series_dir) if series_dir is not None else series_name,
             i,
-            "hybrid_depth+window",
+            f"hu16_i16_offset{HU_OFFSET}_clip{int(HU_CLIP_LO)}_{int(HU_CLIP_HI)}",
         ])
 
 

@@ -22,7 +22,7 @@ Before looking at data, we must prove the Strix Halo can actually run the math.
 Raw medical data is unusable for Vision Transformers. We must transform it.
 
 - [x] **Acquire LIDC-IDRI**: Download the dataset (approx. 120GB) from TCIA.
-- [x] **Develop Preprocessing Pipeline**: Write the script to convert 16-bit DICOM volumes into "2.5D" RGB slices (using the windowing strategy: Lung/Soft-Tissue/Bone).
+- [x] **Develop Preprocessing Pipeline**: Write the script to convert DICOM volumes into **16-bit lossless HU PNG slices** (one file per slice), deferring windowing to training for **random windowing** augmentation.
 - [x] **Data Validation**: Generate a set of 10 random sample images and inspect them visually.
 - [x] **Write Provenance Manifest**: Record counts/bytes and timestamp for raw + processed data.
 
@@ -36,7 +36,7 @@ Raw medical data is unusable for Vision Transformers. We must transform it.
 - Validation script: `scripts/phase2_validate_samples.py`
 - Dataset manifest helper: `scripts/phase2_write_dataset_manifest.py`
 
-**Success Criteria**: The PNGs should clearly show lung texture (not just black/white blobs) and represent 3 depth slices per image; a manifest JSON is generated under `data/processed/_manifests/`.
+**Success Criteria**: Validation previews should clearly show lung texture (not just black/white blobs); the index CSV is generated and Phase 3 can assemble 3-slice inputs (z-1,z,z+1) from the stored HU16 slices; a manifest JSON is generated under `data/processed/_manifests/`.
 
 ## Phase 3: The "Micro-Run" (Fail Fast)
 

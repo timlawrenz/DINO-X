@@ -15,7 +15,7 @@ Recommended external layout:
     └── dino-x/
         └── lidc-idri/
             ├── raw/                 # DICOMs as acquired (never committed)
-            └── processed-2p5d-rgb/   # Derived PNGs + index (also never committed)
+            └── processed-hu16/       # Derived 16-bit HU PNG slices + index (also never committed)
 ```
 
 Repository-local (safe) paths:
@@ -23,7 +23,7 @@ Repository-local (safe) paths:
 ```
 ./data/
 ├── raw/        -> /mnt/nas-ai-models/training-data/dino-x/lidc-idri/raw
-└── processed/  -> /mnt/nas-ai-models/training-data/dino-x/lidc-idri/processed-2p5d-rgb
+└── processed/  -> /mnt/nas-ai-models/training-data/dino-x/lidc-idri/processed-hu16
 ```
 
 ## Environment Variables
@@ -81,7 +81,7 @@ python3 scripts/phase2_tcia_download.py download-series \
 
 **Why:** the NBIA `getSeries` endpoint returns other modalities (e.g. DX) that often have only 1–2 images; those will be skipped by preprocessing.
 
-### 3) Preprocess (DICOM -> 2.5D windowed RGB PNG)
+### 3) Preprocess (DICOM -> 16-bit HU PNG slices)
 
 ```bash
 python3 scripts/phase2_preprocess_lidc_idri.py \
@@ -102,7 +102,7 @@ python3 scripts/phase2_validate_samples.py \
   --seed $(date +%s)
 ```
 
-**Why:** confirms windowing is sane and textures are visible before you start any training.
+**Why:** confirms slices decode correctly and a fixed preview window looks sane before you start any training.
 
 ### 5) Write a provenance manifest (counts + bytes)
 

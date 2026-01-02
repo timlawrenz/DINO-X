@@ -1,6 +1,6 @@
 # Phase 3: Micro-Run (Fail Fast)
 
-Phase 3 proves the full training code-path works on a tiny scale before starting multi-day training.
+Phase 3 proves the full training code-path works on a tiny scale before starting multi-day training (including HU16 slice loading + random windowing).
 
 ## Prereqs
 - Phase 1 completed (ROCm + PyTorch functional)
@@ -24,6 +24,14 @@ Enable Gram Anchoring:
 
 ```bash
 python3 scripts/phase3_micro_run.py --gram --gram-weight 1.0
+```
+
+Random windowing ranges (only used when Phase 2 data is HU16 grayscale slices):
+
+```bash
+python3 scripts/phase3_micro_run.py \
+  --rw-level-min -700 --rw-level-max 100 \
+  --rw-width-min 300 --rw-width-max 2000
 ```
 
 ## Attention kernel selection (ROCm)

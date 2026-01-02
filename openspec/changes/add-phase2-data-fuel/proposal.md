@@ -5,7 +5,7 @@ Phase 2 of the roadmap requires turning raw CT scans into a deterministic, model
 Because the project must remain safe to clone and collaborate on without risking accidental commits of protected raw medical data, raw inputs must live outside the repository.
 
 ## What Changes
-- Define a `data-fuel` capability covering dataset acquisition, secure storage layout, preprocessing into 2.5D RGB slices, and visual validation.
+- Define a `data-fuel` capability covering dataset acquisition, secure storage layout, preprocessing into **16-bit HU PNG slices**, and visual validation.
 - Standardize a NAS-backed raw data location mounted at `/mnt/nas-ai-models/` while keeping the repository self-contained via **local symlinks**.
 - Specify a directory layout and environment variables so all scripts can run on any machine with either:
   - the NAS mount available, or

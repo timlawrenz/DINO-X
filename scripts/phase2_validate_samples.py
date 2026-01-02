@@ -15,9 +15,37 @@ def _need(mod: str) -> None:
 
 
 try:
+    import numpy as np
+except Exception:  # pragma: no cover
+    _need("numpy")
+
+try:
     from PIL import Image
 except Exception:  # pragma: no cover
     _need("pillow")
+
+
+HU_OFFSET = 32768.0
+
+
+def _window_hu_to_u8(img_hu: "np.ndarray", level: float, width: float) -> "np.ndarray":
+    lo = level - width / 2.0
+    hi = level + width / 2.0
+    x = np.clip(img_hu, lo, hi)
+    x = (x - lo) / (hi - lo + 1e-8)
+    return (x * 255.0).astype(np.uint8)
+
+
+def _preview_rgb(p: Path) -> Image.Image:
+    im = Image.open(p)
+    if im.mode.startswith("I"):
+        arr = np.asarray(im)
+        if arr.dtype != np.uint16:
+            arr = arr.astype(np.uint16)
+        hu = arr.astype(np.float32) - HU_OFFSET
+        u8 = _window_hu_to_u8(hu, level=-600.0, width=1500.0)  # lung-ish preview
+        return Image.fromarray(u8, mode="L").convert("RGB")
+    return im.convert("RGB")
 
 
 def main() -> int:
@@ -37,7 +65,7 @@ def main() -> int:
     picks = rng.sample(pngs, k=min(args.n, len(pngs)))
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    imgs = [Image.open(p).convert("RGB") for p in picks]
+    imgs = [_preview_rgb(p) for p in picks]
 
     # Save individual picks
     for i, (p, im) in enumerate(zip(picks, imgs)):

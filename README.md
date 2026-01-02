@@ -39,7 +39,7 @@ We utilize DINOv3 (August 2025), specifically enabling Gram Anchoring.
 
 **Data:**
 - **Source:** LIDC-IDRI (The Cancer Imaging Archive).
-- **Format:** 2.5D Volumetric Slices (3-channel windowing).
+- **Format:** 2.5D volumetric slices stored as **16-bit HU PNG slices** (one file per slice); **random windowing** is applied on-the-fly during training.
 
 ## 📊 Criteria for Success
 

@@ -29,13 +29,13 @@ The system SHALL define how to acquire the LIDC-IDRI dataset and record provenan
 - **THEN** documentation SHALL specify the acquisition source (TCIA) and the expected dataset scale (~120GB)
 - **AND** the system SHALL record a dataset manifest (at minimum: dataset name, acquisition date, and directory layout; optionally: checksums).
 
-### Requirement: Deterministic 2.5D Preprocessing Pipeline
-The system SHALL provide a preprocessing pipeline that converts 16-bit CT DICOM volumes into 2.5D, 3-channel images using Lung/Soft-Tissue/Bone windowing.
+### Requirement: Deterministic HU16 Preprocessing Pipeline
+The system SHALL provide a preprocessing pipeline that converts CT DICOM volumes into **16-bit lossless HU slice PNGs** (one file per axial slice), preserving raw density values.
 
-#### Scenario: DICOM volumes are converted to 2.5D RGB slices
+#### Scenario: DICOM volumes are converted to HU16 grayscale slices
 - **WHEN** preprocessing is run on a DICOM series
-- **THEN** output images SHALL contain three adjacent axial slices mapped into RGB channels
-- **AND** each channel SHALL apply a documented HU windowing strategy (Lung, Soft-Tissue, Bone) to preserve clinically relevant texture.
+- **THEN** output images SHALL store HU values in a reversible uint16 encoding (e.g., offset + clip)
+- **AND** windowing (including random windowing) SHALL be applied during training-time loading, not baked into Phase 2 outputs.
 
 ### Requirement: Visual Data Validation Artifacts
 The system SHALL provide a simple, reproducible visual validation step for Phase 2 outputs.

@@ -49,6 +49,10 @@ except Exception:  # pragma: no cover
 @dataclass(frozen=True)
 class RunConfig:
     img_size: int
+    rw_level_min: float
+    rw_level_max: float
+    rw_width_min: float
+    rw_width_max: float
     patch: int
     dim: int
     depth: int
@@ -161,38 +165,129 @@ def _dino_loss(student_logits: torch.Tensor, teacher_logits: torch.Tensor, t_s: 
     return -(p_t * log_p_s).sum(dim=-1).mean()
 
 
-def _load_index_pngs(index_csv: Path) -> list[Path]:
+@dataclass(frozen=True)
+class IndexRow:
+    png_path: Path
+    series_dir: str
+    slice_index: int
+    encoding: str
+
+
+def _load_index_rows(index_csv: Path) -> list[IndexRow]:
     if not index_csv.exists():
         raise SystemExit(f"index_csv not found: {index_csv}")
 
-    out: list[Path] = []
+    out: list[IndexRow] = []
     with index_csv.open(newline="") as f:
         r = csv.DictReader(f)
-        if "png_path" not in (r.fieldnames or []):
+        fields = set(r.fieldnames or [])
+        if "png_path" not in fields:
             raise SystemExit(f"index_csv missing png_path column: {index_csv}")
         for row in r:
-            out.append(Path(row["png_path"]))
+            out.append(
+                IndexRow(
+                    png_path=Path(row["png_path"]),
+                    series_dir=row.get("series_dir", ""),
+                    slice_index=int(row.get("slice_index", 0) or 0),
+                    encoding=row.get("encoding", ""),
+                )
+            )
     if not out:
         raise SystemExit(f"No rows in index_csv: {index_csv}")
     return out
 
 
+HU_OFFSET = 32768.0
+
+
+def _window_hu_to_01(img_hu: "np.ndarray", level: float, width: float) -> "np.ndarray":
+    lo = level - width / 2.0
+    hi = level + width / 2.0
+    x = np.clip(img_hu, lo, hi)
+    x = (x - lo) / (hi - lo + 1e-8)
+    return x.astype(np.float32)
+
+
 class PngDataset(torch.utils.data.Dataset):
-    def __init__(self, paths: list[Path], img_size: int) -> None:
-        self.paths = paths
+    def __init__(
+        self,
+        rows: list[IndexRow],
+        img_size: int,
+        rw_level_min: float,
+        rw_level_max: float,
+        rw_width_min: float,
+        rw_width_max: float,
+    ) -> None:
+        self.rows = rows
         self.img_size = img_size
+        self.rw_level_min = rw_level_min
+        self.rw_level_max = rw_level_max
+        self.rw_width_min = rw_width_min
+        self.rw_width_max = rw_width_max
+
+        self._series_map: dict[str, dict[int, Path]] = {}
+        self._series_minmax: dict[str, tuple[int, int]] = {}
+        for r in rows:
+            sm = self._series_map.setdefault(r.series_dir, {})
+            sm[r.slice_index] = r.png_path
+        for s, mp in self._series_map.items():
+            if mp:
+                ks = sorted(mp.keys())
+                self._series_minmax[s] = (ks[0], ks[-1])
 
     def __len__(self) -> int:  # pragma: no cover
-        return len(self.paths)
+        return len(self.rows)
+
+    def _load_hu01(self, p: Path, level: float, width: float) -> "np.ndarray":
+        im = Image.open(p)
+        if im.size != (self.img_size, self.img_size):
+            im = im.resize((self.img_size, self.img_size), resample=Image.BILINEAR)
+        arr = np.asarray(im)
+        if arr.dtype != np.uint16:
+            arr = arr.astype(np.uint16)
+        hu = arr.astype(np.float32) - HU_OFFSET
+        return _window_hu_to_01(hu, level=level, width=width)
 
     def __getitem__(self, idx: int) -> torch.Tensor:
-        p = self.paths[idx]
-        im = Image.open(p).convert("RGB")
-        if im.size != (self.img_size, self.img_size):
-            im = im.resize((self.img_size, self.img_size), resample=Image.BICUBIC)
-        arr = np.asarray(im, dtype=np.float32) / 255.0
-        x = torch.from_numpy(arr).permute(2, 0, 1).contiguous()  # (3,H,W)
-        return x
+        row = self.rows[idx]
+        p = row.png_path
+
+        # Legacy mode: baked RGB windows.
+        try:
+            mode = Image.open(p).mode
+        except Exception:
+            mode = ""
+
+        is_hu16 = row.encoding.startswith("hu16") or mode.startswith("I")
+        if not is_hu16:
+            im = Image.open(p).convert("RGB")
+            if im.size != (self.img_size, self.img_size):
+                im = im.resize((self.img_size, self.img_size), resample=Image.BICUBIC)
+            arr = np.asarray(im, dtype=np.float32) / 255.0
+            return torch.from_numpy(arr).permute(2, 0, 1).contiguous()
+
+        # HU16 mode: load z-1/z/z+1 as 3 channels, then apply random windowing.
+        level = random.uniform(self.rw_level_min, self.rw_level_max)
+        width = random.uniform(self.rw_width_min, self.rw_width_max)
+
+        s = row.series_dir
+        z = row.slice_index
+        z0, z1 = self._series_minmax.get(s, (z, z))
+
+        def _clamp(k: int) -> int:
+            return max(z0, min(z1, k))
+
+        mp = self._series_map.get(s, {})
+        p_m1 = mp.get(_clamp(z - 1), p)
+        p_0 = mp.get(_clamp(z), p)
+        p_p1 = mp.get(_clamp(z + 1), p)
+
+        a = self._load_hu01(p_m1, level=level, width=width)
+        b = self._load_hu01(p_0, level=level, width=width)
+        c = self._load_hu01(p_p1, level=level, width=width)
+
+        x = np.stack([a, b, c], axis=0)
+        return torch.from_numpy(x).contiguous()
 
 
 def _save_checkpoint(path: Path, payload: dict[str, Any]) -> None:
@@ -267,6 +362,13 @@ def main() -> int:
     ap.add_argument("--resume", type=Path, default=None, help="Checkpoint path; omit for no resume")
 
     ap.add_argument("--img-size", type=int, default=224)
+
+    # Random windowing (only applied when Phase 2 data is HU16 grayscale slices).
+    ap.add_argument("--rw-level-min", type=float, default=-700.0)
+    ap.add_argument("--rw-level-max", type=float, default=100.0)
+    ap.add_argument("--rw-width-min", type=float, default=300.0)
+    ap.add_argument("--rw-width-max", type=float, default=2000.0)
+
     ap.add_argument("--patch", type=int, default=16)
     ap.add_argument("--dim", type=int, default=384)
     ap.add_argument("--depth", type=int, default=6)
@@ -322,15 +424,33 @@ def main() -> int:
     run_dir = args.run_dir / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    all_pngs = _load_index_pngs(args.index_csv)
+    all_rows = _load_index_rows(args.index_csv)
     rng = random.Random(args.subset_seed)
-    rng.shuffle(all_pngs)
-    subset = all_pngs[: min(args.subset_size, len(all_pngs))]
+    rng.shuffle(all_rows)
+    subset = all_rows[: min(args.subset_size, len(all_rows))]
 
-    (run_dir / "subset.json").write_text(json.dumps([str(p) for p in subset], indent=2) + "\n")
+    (run_dir / "subset.json").write_text(
+        json.dumps(
+            [
+                {
+                    "png_path": str(r.png_path),
+                    "series_dir": r.series_dir,
+                    "slice_index": r.slice_index,
+                    "encoding": r.encoding,
+                }
+                for r in subset
+            ],
+            indent=2,
+        )
+        + "\n"
+    )
 
     cfg = RunConfig(
         img_size=args.img_size,
+        rw_level_min=args.rw_level_min,
+        rw_level_max=args.rw_level_max,
+        rw_width_min=args.rw_width_min,
+        rw_width_max=args.rw_width_max,
         patch=args.patch,
         dim=args.dim,
         depth=args.depth,
@@ -359,7 +479,14 @@ def main() -> int:
     gen = torch.Generator()
     gen.manual_seed(args.train_seed)
 
-    ds = PngDataset(subset, img_size=args.img_size)
+    ds = PngDataset(
+        subset,
+        img_size=args.img_size,
+        rw_level_min=args.rw_level_min,
+        rw_level_max=args.rw_level_max,
+        rw_width_min=args.rw_width_min,
+        rw_width_max=args.rw_width_max,
+    )
     dl = torch.utils.data.DataLoader(
         ds,
         batch_size=args.batch_size,
