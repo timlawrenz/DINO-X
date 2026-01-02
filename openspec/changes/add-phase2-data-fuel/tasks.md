@@ -1,5 +1,5 @@
 ## 1. Implementation
-- [x] 1.1 Document dataset storage conventions (NAS mount, local symlink pattern, environment variables) in `docs/`.
+- [x] 1.1 Document dataset storage conventions (NAS mount, local symlink pattern, environment variables) in `docs/` (see `docs/data_fuel.md`).
 - [x] 1.2 Add repo safety defaults to prevent committing data (e.g., ignore `data/`, DICOM, PNG/JPEG outputs).
 - [x] 1.3 Implement a data-root bootstrap helper (script) that creates idempotent symlinks (e.g., `data/raw` → `/mnt/nas-ai-models/training-data/dino-x/lidc-idri/raw`).
 - [x] 1.4 Implement LIDC-IDRI acquisition instructions and manifest tracking (source URL, expected size, optional checksums).
