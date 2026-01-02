@@ -14,9 +14,7 @@ import argparse
 import time
 
 
-def _pick_device(prefer: str) -> str:
-    import torch
-
+def _pick_device(torch, prefer: str) -> str:
     if prefer != "auto":
         return prefer
     return "cuda" if torch.cuda.is_available() else "cpu"
@@ -29,10 +27,23 @@ def main() -> int:
     parser.add_argument("--size", type=int, default=512)
     args = parser.parse_args()
 
-    import torch
-    import torch.nn.functional as F
+    try:
+        import torch
+        import torch.nn.functional as F
+    except ImportError as e:
+        msg = str(e)
+        if "libroctx64.so" in msg:
+            raise SystemExit(
+                "Failed to import torch due to missing ROCm runtime libraries.\n"
+                "Try sourcing the repo helper for your shell before running:\n"
+                "  bash/zsh: source scripts/rocm_env.sh\n"
+                "  fish:     source scripts/rocm_env.fish\n"
+                "Or export LD_LIBRARY_PATH to include /opt/rocm/lib and /opt/rocm/lib64.\n\n"
+                f"Original error: {e}"
+            )
+        raise
 
-    device = _pick_device(args.device)
+    device = _pick_device(torch, args.device)
     dtype = torch.float16 if args.dtype == "fp16" else torch.float32
 
     print(f"torch={torch.__version__}")

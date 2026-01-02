@@ -23,12 +23,40 @@ uname -r
 
 Install ROCm **7.1** with **gfx1151** support and ensure core libraries are present (MIOpen, hipBLASLt, RCCL).
 
-Validation commands (names may vary by distro/package):
+### Shell environment (required for ROCm wheels)
+
+If you installed ROCm userland under `/opt/rocm`, ensure it is on your PATH and its libraries are discoverable.
+
+Bash/zsh:
+
+```bash
+export PATH=/opt/rocm/bin:$PATH
+export LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib64:${LD_LIBRARY_PATH:-}
+```
+
+Fish:
+
+```fish
+fish_add_path /opt/rocm/bin
+set -gx LD_LIBRARY_PATH /opt/rocm/lib /opt/rocm/lib64 $LD_LIBRARY_PATH
+```
+
+Alternatively, source the repo helpers:
+
+```bash
+source scripts/rocm_env.sh
+```
+
+```fish
+source scripts/rocm_env.fish
+```
+
+### Validation commands
 
 ```bash
 rocminfo
-hipinfo
-python -c "import torch; print(torch.__version__); print(torch.cuda.is_available())"
+hipconfig --full
+python -c "import torch; print(torch.__version__); print(torch.version.hip); print(torch.cuda.is_available())"
 ```
 
 ## 4) Flash Attention 2 (Triton/CK backend)
@@ -43,7 +71,8 @@ Compile/install Flash Attention 2 for the ROCm stack you installed.
 Run the repo-provided script:
 
 ```bash
-python scripts/phase1_validate_attention.py --size 512 --device auto --dtype fp16
+# If torch+ROCm is installed, use the ROCm device (PyTorch reports it as "cuda"):
+python scripts/phase1_validate_attention.py --size 512 --device cuda --dtype fp16
 ```
 
 **Success criteria:** completes without crashes/hangs and prints `ok=true`.
