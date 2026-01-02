@@ -14,3 +14,4 @@ torchaudio @ file:///home/tim/activity/DINO-X/rocm-wheels/torchaudio-2.9.0%2Broc
 torchvision @ file:///home/tim/activity/DINO-X/rocm-wheels/torchvision-0.24.0%2Brocm7.1.1.gitb919bd0c-cp313-cp313-linux_x86_64.whl#sha256=33f0900eb0eb9b2bcb70f7458c08f00e75d08bf85342e1d93144c7a9ea4f4fb9
 triton @ file:///home/tim/activity/DINO-X/rocm-wheels/triton-3.5.1%2Brocm7.1.1.gita272dfa8-cp313-cp313-linux_x86_64.whl#sha256=46bfcf4efe3638814b7bd4611b293abe454487ad4f685d5a7da12d6e3a9c4fa0
 typing_extensions==4.15.0
+pydicom==3.0.1

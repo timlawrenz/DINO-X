@@ -25,6 +25,16 @@ Raw medical data is unusable for Vision Transformers. We must transform it.
 - [ ] **Develop Preprocessing Pipeline**: Write the script to convert 16-bit DICOM volumes into "2.5D" RGB slices (using the windowing strategy: Lung/Soft-Tissue/Bone).
 - [ ] **Data Validation**: Generate a set of 10 random sample images and inspect them visually.
 
+**Implementation links (OpenSpec + docs):**
+- OpenSpec change: `openspec/changes/add-phase2-data-fuel/proposal.md`
+- Tasks checklist: `openspec/changes/add-phase2-data-fuel/tasks.md`
+- Data guide: `docs/data_fuel.md`
+- LIDC-IDRI acquisition: `docs/lidc_idri.md`
+- Symlink bootstrap: `scripts/phase2_setup_data_root.sh`
+- Preprocessing script: `scripts/phase2_preprocess_lidc_idri.py`
+- Validation script: `scripts/phase2_validate_samples.py`
+- Dataset manifest helper: `scripts/phase2_write_dataset_manifest.py`
+
 **Success Criteria**: The PNGs should clearly show lung texture (not just black/white blobs) and represent 3 depth slices per image.
 
 ## Phase 3: The "Micro-Run" (Fail Fast)

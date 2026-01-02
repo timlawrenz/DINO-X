@@ -5,5 +5,9 @@
 #   (or by installing and re-freezing inside .venv).
 # - Keep this list small; add packages as they are introduced into src/scripts.
 
-# Placeholder (Phase 1 adds no runtime deps beyond torch, installed per ROCm setup).
-# torch
+# Phase 2 data tooling
+numpy
+pillow
+pydicom
+
+# torch (installed per ROCm setup script / wheels)

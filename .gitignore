@@ -7,3 +7,19 @@ rocm-wheels/
 
 # Local logs / captures
 *.log
+
+# Phase 2 data (never commit raw medical data or derived datasets)
+data/
+
+# Common medical imaging formats (raw)
+*.dcm
+*.dicom
+*.nii
+*.nii.gz
+*.mhd
+*.nrrd
+
+# Derived images (scoped to data folder only)
+data/**/*.png
+data/**/*.jpg
+data/**/*.jpeg
