@@ -1,0 +1,89 @@
+HIP version: 7.1.52802-26aae437f6
+
+==hipconfig
+HIP_PATH           :/opt/rocm-7.1.1
+ROCM_PATH          :/opt/rocm-7.1.1
+HIP_COMPILER       :clang
+HIP_PLATFORM       :amd
+HIP_RUNTIME        :rocclr
+CPP_CONFIG         : -D__HIP_PLATFORM_HCC__= -D__HIP_PLATFORM_AMD__= -I/opt/rocm-7.1.1/include -I/include
+
+==hip-clang
+HIP_CLANG_PATH     :/opt/rocm-7.1.1/lib/llvm/bin
+AMD clang version 20.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.1.1 25444 27682a16360e33e37c4f3cc6adf9a620733f8fe1)
+Target: x86_64-unknown-linux-gnu
+Thread model: posix
+InstalledDir: /opt/rocm-7.1.1/lib/llvm/bin
+Configuration file: /opt/rocm-7.1.1/lib/llvm/bin/clang++.cfg
+AMD LLVM version 20.0.0git
+  Optimized build.
+  Default target: x86_64-unknown-linux-gnu
+  Host CPU: znver5
+
+  Registered Targets:
+    amdgcn - AMD GCN GPUs
+    r600   - AMD GPUs HD2XXX-HD6XXX
+    x86    - 32-bit X86: Pentium-Pro and above
+    x86-64 - 64-bit X86: EM64T and AMD64
+hip-clang-cxxflags :
+ -O3
+hip-clang-ldflags :
+--driver-mode=g++ -O3 --hip-link
+
+== Environment Variables
+PATH =/home/tim/activity/DINO-X/.venv/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/home/tim/.rvm/gems/ruby-3.4.5/bin:/home/tim/.rvm/gems/ruby-3.4.5@global/bin:/home/tim/.rvm/rubies/ruby-3.4.5/bin:/home/tim/.rvm/bin:/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
+
+== Linux Kernel
+Hostname      :
+max395
+Linux max395 6.17.0-8-generic #8-Ubuntu SMP PREEMPT_DYNAMIC Fri Nov 14 21:44:46 UTC 2025 x86_64 GNU/Linux
+Distributor ID:	Ubuntu
+Description:	Ubuntu 25.10
+Release:	25.10
+Codename:	questing
+
+HIP version: 7.1.52802-26aae437f6
+
+==hipconfig
+HIP_PATH           :/opt/rocm-7.1.1
+ROCM_PATH          :/opt/rocm-7.1.1
+HIP_COMPILER       :clang
+HIP_PLATFORM       :amd
+HIP_RUNTIME        :rocclr
+CPP_CONFIG         : -D__HIP_PLATFORM_HCC__= -D__HIP_PLATFORM_AMD__= -I/opt/rocm-7.1.1/include -I/include
+
+==hip-clang
+HIP_CLANG_PATH     :/opt/rocm-7.1.1/lib/llvm/bin
+AMD clang version 20.0.0git (https://github.com/RadeonOpenCompute/llvm-project roc-7.1.1 25444 27682a16360e33e37c4f3cc6adf9a620733f8fe1)
+Target: x86_64-unknown-linux-gnu
+Thread model: posix
+InstalledDir: /opt/rocm-7.1.1/lib/llvm/bin
+Configuration file: /opt/rocm-7.1.1/lib/llvm/bin/clang++.cfg
+AMD LLVM version 20.0.0git
+  Optimized build.
+  Default target: x86_64-unknown-linux-gnu
+  Host CPU: znver5
+
+  Registered Targets:
+    amdgcn - AMD GCN GPUs
+    r600   - AMD GPUs HD2XXX-HD6XXX
+    x86    - 32-bit X86: Pentium-Pro and above
+    x86-64 - 64-bit X86: EM64T and AMD64
+hip-clang-cxxflags :
+ -O3
+hip-clang-ldflags :
+--driver-mode=g++ -O3 --hip-link
+
+== Environment Variables
+PATH =/home/tim/activity/DINO-X/.venv/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/home/tim/.rvm/gems/ruby-3.4.5/bin:/home/tim/.rvm/gems/ruby-3.4.5@global/bin:/home/tim/.rvm/rubies/ruby-3.4.5/bin:/home/tim/.rvm/bin:/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
+
+== Linux Kernel
+Hostname      :
+max395
+Linux max395 6.17.0-8-generic #8-Ubuntu SMP PREEMPT_DYNAMIC Fri Nov 14 21:44:46 UTC 2025 x86_64 GNU/Linux
+Distributor ID:	Ubuntu
+Description:	Ubuntu 25.10
+Release:	25.10
+Codename:	questing
+
+7.1.52802-26aae437f6
