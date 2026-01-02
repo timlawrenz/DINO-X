@@ -3,7 +3,7 @@ __pycache__/
 *.pyc
 
 # Local ROCm wheel cache (large binaries, do not commit)
-rocm-wheels/*.whl
+rocm-wheels/
 
 # Local logs / captures
 *.log

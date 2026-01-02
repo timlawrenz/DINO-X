@@ -134,3 +134,14 @@ print("cuda_is_available (ROCm):", torch.cuda.is_available())
 if torch.cuda.is_available():
     print("device 0:", torch.cuda.get_device_name(0))
 EOF
+
+########################################
+# 5. PHASE 1 ATTENTION SMOKE TEST      #
+########################################
+
+echo_step "Step 5: Phase 1 attention smoke test (512x512)"
+
+# Enable experimental mem-efficient SDPA path on ROCm (recommended on Strix Halo).
+export TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1
+
+python scripts/phase1_validate_attention.py --size 512 --device cuda --dtype fp16

@@ -4,10 +4,10 @@
 
 Before looking at data, we must prove the Strix Halo can actually run the math.
 
-- [ ] **Hardware Assembly & Thermal Check**: Install the Strix Halo in the Framework/Desktop chassis. Configure fans to "Server/Turbo" mode in BIOS.
-- [ ] **OS & Kernel Setup**: Install Linux (Kernel 6.11+ required for Strix Halo NPU/GPU addressing).
-- [ ] **ROCm 7.1 Installation**: Install the gfx1151 specific drivers and libraries (miopen-hip, rccl).
-- [ ] **Flash Attention Compilation**: Compile Flash Attention 2 using the Triton backend.
+- [x] **Hardware Assembly & Thermal Check**: Install the Strix Halo in the Framework/Desktop chassis. Configure fans to "Server/Turbo" mode in BIOS.
+- [x] **OS & Kernel Setup**: Install Linux (Kernel 6.11+ required for Strix Halo NPU/GPU addressing).
+- [x] **ROCm 7.1 Installation**: Install the gfx1151 specific drivers and libraries (miopen-hip, rccl).
+- [x] **Flash Attention Compilation**: Compile Flash Attention 2 using the Triton backend.
 
 **Implementation links (OpenSpec + docs):**
 - OpenSpec change: `openspec/changes/add-phase1-platform-bootstrap/proposal.md`

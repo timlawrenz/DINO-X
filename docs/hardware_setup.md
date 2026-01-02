@@ -61,10 +61,23 @@ python -c "import torch; print(torch.__version__); print(torch.version.hip); pri
 
 ## 4) Flash Attention 2 (Triton/CK backend)
 
-Compile/install Flash Attention 2 for the ROCm stack you installed.
+On this stack, FlashAttention-style kernels are provided through **PyTorch SDPA** on ROCm (AOTriton/Triton backend). There is no separate `flash-attn` Python package required for the Phase 1 smoke test.
 
-- Record the exact versions (ROCm, PyTorch, Triton/CK, FlashAttention) and build flags.
-- Run a minimal attention forward-pass test after installation.
+Record versions (copy/paste output into your run log):
+
+```bash
+hipconfig --full | head -n 40
+python -c "import torch; print('torch', torch.__version__); print('hip', torch.version.hip)"
+python -c "import triton; print('triton', triton.__version__)"  # if installed
+```
+
+Enable the experimental mem-efficient SDPA path (recommended on Strix Halo):
+
+```bash
+export TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1
+```
+
+Then run the attention smoke test in the next section (this also serves as the FlashAttention/SDPA smoke test).
 
 ## 5) Phase 1 success check: attention smoke test
 
