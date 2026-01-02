@@ -76,3 +76,12 @@ python3 scripts/phase3_micro_run.py \
 ```
 
 The loss should continue from approximately where it left off (not restart from scratch).
+
+## Optional: Exclude a reserved validation split (Phase 4)
+
+If you have created a Phase 4 split manifest, you can exclude the validation set during training:
+
+```bash
+python3 scripts/phase3_micro_run.py \
+  --split-manifest data/processed/_splits/val10_seed0.json
+```

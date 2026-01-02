@@ -65,6 +65,13 @@ Flying blind for 15 days is dangerous. We need instruments.
   - Calculate the Standard Deviation of embeddings (to detect collapse).
 - [ ] **Define Validation Set**: Isolate 10% of the data now so it never leaks into the training set.
 
+**Implementation links (OpenSpec + docs):**
+- OpenSpec change: `openspec/changes/add-phase4-instrumentation-navigation/proposal.md`
+- Tasks checklist: `openspec/changes/add-phase4-instrumentation-navigation/tasks.md`
+- Phase 4 guide: `docs/phase4_instrumentation.md`
+- Split manifest generator: `scripts/phase4_make_split_manifest.py`
+- Training monitor: `scripts/phase4_monitor.py`
+
 ## Phase 5: The "Big Run" (Execution)
 
 The 15-day marathon.

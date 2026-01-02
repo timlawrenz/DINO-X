@@ -25,7 +25,10 @@ from typing import Any
 
 
 def _need(mod: str) -> None:
-    raise SystemExit(f"Missing dependency: {mod}. Install it (e.g., into .venv) and retry.")
+    raise SystemExit(
+        f"Missing dependency: {mod}. Install it (e.g., into .venv) and retry. "
+        "If you're using ROCm PyTorch, ensure ROCm libs are discoverable (e.g., `source scripts/rocm_env.*`)."
+    )
 
 
 try:
@@ -72,6 +75,9 @@ class RunConfig:
     train_seed: int
     sdp_backend: str
     index_csv: str
+    split_manifest: str | None
+    split_val_series: int
+    split_excluded_rows: int
 
 
 class PatchViT(nn.Module):
@@ -358,6 +364,12 @@ class _StopFlag:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--index-csv", type=Path, default=Path("data/processed/_index/index.csv"))
+    ap.add_argument(
+        "--split-manifest",
+        type=Path,
+        default=None,
+        help="Optional Phase 4 split manifest; validation split is excluded from training",
+    )
     ap.add_argument("--run-dir", type=Path, default=Path("data/runs/phase3_micro_run"))
     ap.add_argument("--resume", type=Path, default=None, help="Checkpoint path; omit for no resume")
 
@@ -425,6 +437,26 @@ def main() -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
 
     all_rows = _load_index_rows(args.index_csv)
+
+    split_manifest = None
+    split_val_series = 0
+    split_excluded_rows = 0
+    if args.split_manifest is not None:
+        split_manifest = args.split_manifest
+        payload = json.loads(split_manifest.read_text())
+        val_series = payload.get("val", {}).get("series_dir", [])
+        if not isinstance(val_series, list) or not val_series:
+            raise SystemExit(f"invalid split manifest (missing val.series_dir): {split_manifest}")
+        split_val_series = len(val_series)
+        val_set = set(str(s) for s in val_series)
+        before = len(all_rows)
+        all_rows = [r for r in all_rows if str(r.series_dir) not in val_set]
+        split_excluded_rows = before - len(all_rows)
+        print(
+            f"split_manifest={split_manifest} val_series={split_val_series} "
+            f"excluded_rows={split_excluded_rows}"
+        )
+
     rng = random.Random(args.subset_seed)
     rng.shuffle(all_rows)
     subset = all_rows[: min(args.subset_size, len(all_rows))]
@@ -470,6 +502,9 @@ def main() -> int:
         train_seed=args.train_seed,
         sdp_backend=args.sdp_backend,
         index_csv=str(args.index_csv),
+        split_manifest=str(split_manifest) if split_manifest is not None else None,
+        split_val_series=int(split_val_series),
+        split_excluded_rows=int(split_excluded_rows),
     )
     (run_dir / "config.json").write_text(json.dumps(asdict(cfg), indent=2) + "\n")
 
