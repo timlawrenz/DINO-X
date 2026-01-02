@@ -24,7 +24,7 @@ This repo includes a small helper:
 
 - `scripts/phase2_tcia_download.py`
 
-### 1) List series UIDs for LIDC-IDRI
+### 1) List series UIDs for LIDC-IDRI (optional)
 
 Note: `getSeries` returns multiple modalities; for preprocessing we want **CT** series with many slices.
 
@@ -38,13 +38,22 @@ python3 scripts/phase2_tcia_download.py list-series \
   --out /tmp/lidc_ct_series_uids.txt
 ```
 
-### 2) Download/extract series into `data/raw/`
+### 2) Download/extract *all* CT series into `data/raw/` (recommended)
+
+This resolves the series list and downloads it in one step.
+It is **resumable by default**: re-run the same command after an interruption.
 
 ```bash
-python3 scripts/phase2_tcia_download.py download-series \
-  --uids /tmp/lidc_ct_series_uids.txt \
-  --out-root data/raw
+python3 scripts/phase2_tcia_download.py download-collection \
+  --collection LIDC-IDRI \
+  --modality CT \
+  --min-image-count 50 \
+  --sort-by imagecount \
+  --out-root data/raw \
+  --out-uids /tmp/lidc_ct_series_uids.txt
 ```
+
+(If you want the old two-step flow, you can still use `list-series` + `download-series`.)
 
 Optional auth:
 - Public collections often work without a key.

@@ -60,7 +60,7 @@ DINOX_DATA_ROOT=/path/to/training-data/dino-x bash scripts/phase2_setup_data_roo
 
 ### 2) Acquire LIDC-IDRI (TCIA, CT-only)
 
-Generate a list of **CT** series UIDs with enough slices to support 2.5D:
+(Optional) Generate a list of **CT** series UIDs with enough slices to support 2.5D:
 
 ```bash
 python3 scripts/phase2_tcia_download.py list-series \
@@ -71,12 +71,25 @@ python3 scripts/phase2_tcia_download.py list-series \
   --out /tmp/lidc_ct_series_uids.txt
 ```
 
-Download + extract series into `data/raw` (run under `tmux` for long downloads):
+If you already have a UID list, you can download just those with:
 
 ```bash
 python3 scripts/phase2_tcia_download.py download-series \
   --uids /tmp/lidc_ct_series_uids.txt \
   --out-root data/raw
+```
+
+Download + extract series into `data/raw` (run under `tmux` for long downloads).
+This is **resumable by default**: re-run after an interruption.
+
+```bash
+python3 scripts/phase2_tcia_download.py download-collection \
+  --collection LIDC-IDRI \
+  --modality CT \
+  --min-image-count 50 \
+  --sort-by imagecount \
+  --out-root data/raw \
+  --out-uids /tmp/lidc_ct_series_uids.txt
 ```
 
 **Why:** the NBIA `getSeries` endpoint returns other modalities (e.g. DX) that often have only 1–2 images; those will be skipped by preprocessing.
