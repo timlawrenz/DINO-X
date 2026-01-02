@@ -53,24 +53,31 @@ We define success not just by "the code runs," but by three scientific benchmark
 
 ## 📂 Repository Structure
 
-Detailed documentation on the specific implementation, math, and configs can be found in the `/docs` folder.
+Key documentation and Phase 1 tooling live in `docs/` and `scripts/`.
 
 ```
 /
 ├── docs/
-│   ├── hardware_setup.md    # BIOS, Kernel, and Cooling configs for Strix Halo
-│   ├── dinov3_config.md     # Specific hyperparameters and Gram Anchoring math
-│   └── data_pipeline.md     # DICOM windowing and preprocessing logic
-├── src/                     # Source code (Training loop, Model definitions)
-├── configs/                 # YAML configuration files
-├── notebooks/               # Jupyter notebooks for visualization and probing
-└── README.md                # This file
+│   ├── roadmap.md                     # Project roadmap (Phase 1–6)
+│   ├── hardware_setup.md              # Phase 1 platform bootstrap guide
+│   └── ROCm 7.1 DINO-X Viability Review.md
+├── openspec/
+│   ├── project.md                     # Project conventions/context
+│   └── changes/                       # OpenSpec proposals and task checklists
+├── scripts/
+│   ├── phase1_validate_attention.py   # Phase 1 attention smoke test
+│   ├── rocm_env.sh                    # ROCm env helper (bash/zsh)
+│   └── rocm_env.fish                  # ROCm env helper (fish)
+├── setup_rocm_8060s.sh                # Install ROCm PyTorch wheels into .venv
+├── requirements.in                    # Minimal human-maintained deps
+├── requirements.txt                   # Fully pinned snapshot (generated from .venv)
+└── README.md
 ```
 
 ## 📜 Citation & License
 This project is currently in the **Planning / Pre-Production** phase.
 
-- **License:** Apache 2.0 (Planned)
+- **License:** GPLv3 (see `LICENSE`)
 - **Base Architecture:** Meta Research / DINOv3
 
 > **Note:** This project pushes consumer hardware to its absolute thermal and memory limits. It is designed as a "Stress Test" for the concept of Garage-Scale Foundation Models.
