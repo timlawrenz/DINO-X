@@ -42,13 +42,19 @@ Raw medical data is unusable for Vision Transformers. We must transform it.
 
 Do not start the main training yet. We need to prove the code works on a tiny scale.
 
-- [ ] **Implement DINOv3 Loop**: Port the training loop with Gram Anchoring enabled.
-- [ ] **Implement Checkpointing**: Write the code to save/resume model state (.pth) every N steps.
-- [ ] **The "Overfit" Test**:
+- [x] **Implement DINOv3 Loop**: Port the training loop with Gram Anchoring enabled.
+- [x] **Implement Checkpointing**: Write the code to save/resume model state (.pth) every N steps.
+- [x] **The "Overfit" Test**:
   - Take only 1,000 images.
   - Train for 1 hour.
   - **Success Criteria**: Loss must drop significantly (near zero). This proves the model can learn and the gradient path is connected.
-- [ ] **The "Restart" Test**: Interrupt the training (Ctrl+C), load the last checkpoint, and resume. Verify loss continues from where it left off.
+- [x] **The "Restart" Test**: Interrupt the training (Ctrl+C), load the last checkpoint, and resume. Verify loss continues from where it left off.
+
+**Implementation links (OpenSpec + docs):**
+- OpenSpec change: `openspec/changes/add-phase3-micro-run/proposal.md`
+- Tasks checklist: `openspec/changes/add-phase3-micro-run/tasks.md`
+- Micro-run guide: `docs/phase3_micro_run.md`
+- Training script: `scripts/phase3_micro_run.py`
 
 ## Phase 4: The Instrumentation (Navigation)
 

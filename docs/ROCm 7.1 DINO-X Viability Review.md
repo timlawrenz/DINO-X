@@ -130,12 +130,19 @@ Efficient training of Vision Transformers is impossible without **Flash Attentio
 * **Strix Halo Status:** Research snippets confirm that FA2 is functional on Strix Halo, particularly via the **Triton backend**.14 Benchmarks show llama.cpp using FA2 on Strix Halo achieving significant speedups in prompt processing (a compute-bound task similar to training forward pass).16  
 * **Requirement:** Project DINO-X must utilize a PyTorch build compiled with ROCM\_FLASH\_ATTN=1 and TRITON\_USE\_ROCM=1 to unlock this capability. Without FA2, the training time would likely balloon from \~15 days to \>40 days due to the bandwidth bottleneck.
 
+* **Repo Status (January 2026):** Phase 3 micro-training is running successfully on the pinned ROCm PyTorch wheels in this repo.
+  * For correctness/stability during bring-up, `scripts/phase3_micro_run.py` commonly uses the SDPA **math** backend (`--sdp-backend math`).
+  * Experimental fused SDPA kernels (AOTriton) can be enabled for benchmarking with `TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1` and `--sdp-backend auto`/`mem_efficient`.
+  * Build-time flags `ROCM\_FLASH\_ATTN` / `TRITON\_USE\_ROCM` for the installed wheel are not yet verified; treat that as a Phase 5 performance-tuning verification step.
+
 ### **3.3 The Criticality of hipBLASLt**
 
 Standard matrix multiplications in ROCm use rocBLAS. However, rocBLAS is a general-purpose library. **hipBLASLt** is a lightweight library specifically designed to expose the **WMMA (Wave Matrix Multiply Accumulate)** tensor cores of RDNA 3 architectures.10
 
 * **Performance Delta:** The difference is staggering. Benchmarks on Strix Halo show a **7x performance gap** between standard kernels (5 TFLOPS) and hipBLASLt kernels (37 TFLOPS).10  
 * **Implementation Detail:** PyTorch for ROCm does not always default to hipBLASLt for consumer cards. The user may need to set specific environment flags (e.g., ROCBLAS\_USE\_HIPBLASLT=1) or compile PyTorch from source with specific build arguments to ensure these kernels are invoked. This is a critical technical success criterion.
+
+* **Repo Status (January 2026):** The repo does not force hipBLASLt by default; consider exporting `ROCBLAS\_USE\_HIPBLASLT=1` during Phase 5 benchmarking and validating the performance delta with a dedicated GEMM/matmul benchmark (or end-to-end throughput on the training loop).
 
 ### **3.4 OS and Kernel Dependencies**
 
