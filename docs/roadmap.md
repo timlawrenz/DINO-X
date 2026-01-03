@@ -97,7 +97,8 @@ We don't need 120GB of unique files to test throughput; we need to force the Dat
 
 The 15-day marathon.
 
-- [ ] **Launch Training**: Run the script on the full dataset with Batch Size ~128+.
+- [ ] **Launch Training (Large-first)**: Run a ViT-Large configuration first to validate convergence signals on the 15‑day budget (target effective batch size ≥256 via gradient accumulation).
+- [ ] **Consider Giant Run (After Validation)**: If the Large run shows stable training and improving representation quality, attempt a follow-on ViT-Giant run using the throughput-tuned configuration.
 - [ ] **Daily Health Check**: Briefly check thermal logs and the "Monitor" outputs every morning.
 
 ## Phase 6: Validation (The Proof)

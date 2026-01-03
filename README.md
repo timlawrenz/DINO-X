@@ -7,7 +7,9 @@ By leveraging the massive Unified Memory Architecture of the AMD Strix Halo, thi
 ## 🎯 The Mission
 General-purpose vision models (like DINOv2 trained on ImageNet) excel at recognizing objects defined by edges and colors (cars, dogs, faces). However, they frequently fail in medical imaging, which relies on subtle texture differences (tissue density, nodules vs. vessels) in grayscale environments.
 
-**The Goal:** Train a ViT-Giant (1B+ params) backbone purely on unlabeled Chest CT volumes that understands lung tissue structure better than any supervised model currently available.
+**The Goal:** Train a high-capacity ViT backbone purely on unlabeled Chest CT volumes that understands lung tissue structure better than any supervised model currently available.
+
+**Execution Plan:** Start with a ViT-Large full run to validate end-to-end feasibility and convergence within the 15‑day budget, then consider a follow-on ViT-Giant (1B+ params) run once stability and throughput are proven.
 
 **The Output:** A pre-trained `.pth` backbone released open-source, allowing researchers to train cancer detection classifiers with 95% fewer labeled images.
 
