@@ -29,6 +29,8 @@ The tuning entrypoint SHALL detect out-of-memory failures and continue the grid 
 ### Requirement: Bottleneck Classification Metrics
 The tuning entrypoint SHALL measure step-time components sufficient to classify whether the run is compute-bound or IO-bound.
 
+The tuning entrypoint SHOULD record the tuned configuration decisions used for Phase 5 (e.g., model size and effective batch target) alongside measured throughput so the project can justify and reproduce the selected launch settings.
+
 #### Scenario: IO vs compute signal is emitted
 - **WHEN** the tool executes benchmark steps for a given parameter combination
 - **THEN** it SHALL report separate timing measurements for data decode/transform and for forward/backward/optimizer step

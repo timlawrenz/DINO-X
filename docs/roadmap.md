@@ -91,7 +91,13 @@ We don't need 120GB of unique files to test throughput; we need to force the Dat
 - OpenSpec change: `openspec/changes/add-throughput-tuning/proposal.md`
 - Tasks checklist: `openspec/changes/add-throughput-tuning/tasks.md`
 
-**Success Criteria**: Produce a Phase 5 launch configuration that (1) reaches the maximum stable batch size without OOM, and (2) selects `num_workers`/`pin_memory` at the throughput knee so the GPU stays busy without saturating unified memory bandwidth.
+**Current tuned decision (Strix Halo)**
+- **Target architecture (Phase 5 Large-first):** ViT-Large (`--vit-patch 14 --vit-dim 1024 --vit-depth 24 --vit-heads 16`)
+- **Target effective batch:** `256+` (DINO stability)
+- **Tuned config:** `--batch-sizes 128 --grad-accum-steps 2 --grad-checkpoint`
+- **Observed peak throughput:** ~23.5 img/s (Strix Halo, Triton enabled)
+
+**Success Criteria**: Produce a Phase 5 launch configuration that (1) reaches the maximum stable effective batch size (≥256) without OOM/kernel instability, and (2) selects `num_workers`/`pin_memory` at the throughput knee so the GPU stays busy without saturating unified memory bandwidth.
 
 ## Phase 5: The "Big Run" (Execution)
 

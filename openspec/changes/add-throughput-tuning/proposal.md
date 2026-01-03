@@ -12,6 +12,12 @@ Because Strix Halo has unusually large unified memory capacity but comparatively
   - `pin_memory` (validate Strix Halo APU behavior; sometimes `False` can be faster)
 - Emit machine-readable results (CSV/JSON) and a summary recommendation for Phase 5.
 
+## Current Decision (Captured)
+- Target Phase 5 validation run: **ViT-Large** (`--vit-patch 14 --vit-dim 1024 --vit-depth 24 --vit-heads 16`).
+- Target stability: **effective batch ≥256**.
+- Tuned configuration: `--batch-sizes 128 --grad-accum-steps 2 --grad-checkpoint`.
+- Observed peak throughput: **~23.5 img/s** on Strix Halo with Triton enabled.
+
 ## Impact
 - Affected specs: `specs/throughput-tuning/spec.md` (new capability; added requirements).
 - Affected code (future implementation): `scripts/tune_throughput.py` plus small shared utilities for timing/memory metrics if needed.
