@@ -61,8 +61,41 @@ try:
     import torch
     import torch.nn as nn
     import torch.nn.functional as F
+    from torch.utils.tensorboard import SummaryWriter
 except Exception:
     _need("torch")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Monitoring Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def make_attention_heatmap(
+    model: DinoStudentTeacher,
+    batch: torch.Tensor,
+) -> np.ndarray:
+    """Generate attention heatmap for the first image in batch."""
+    model.eval()
+    with torch.no_grad():
+        feats = model.backbone(batch[0:1]) # (1, N+1, D)
+    model.train()
+    
+    # L2 norm of patch tokens (skip CLS)
+    patch_tokens = feats[:, 1:, :] # (1, N, D)
+    norms = torch.norm(patch_tokens, dim=-1).squeeze(0) # (N,)
+    
+    # Normalize to [0, 1]
+    norms = (norms - norms.min()) / (norms.max() - norms.min() + 1e-8)
+    
+    # Reshape to grid
+    grid_size = int(np.sqrt(norms.shape[0]))
+    heatmap = norms.reshape(grid_size, grid_size).cpu().numpy()
+    
+    # Resize to match input image size for better visualization
+    # We return the small heatmap; TensorBoard handles resizing if needed,
+    # or we can rely on the viewer. 
+    return heatmap
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1016,6 +1049,10 @@ def main() -> None:
         if loaded_cfg.model.name != model_cfg.name:
             warnings.warn(f"Model config mismatch: checkpoint={loaded_cfg.model.name} requested={model_cfg.name}")
     
+    # TensorBoard Logger
+    tb_writer = SummaryWriter(log_dir=str(run_dir))
+    print(f"tensorboard_log_dir={run_dir}")
+
     # ─────────────────────────────────────────────────────────────────────────
     # 6. Training Loop
     # ─────────────────────────────────────────────────────────────────────────
@@ -1067,13 +1104,14 @@ def main() -> None:
             )
             
             # Gram anchoring (optional but enabled)
+            loss_gram = torch.tensor(0.0, device=device)
             if training_cfg.gram_enabled:
                 student_feats = student.backbone(batch)
                 with torch.no_grad():
                     teacher_feats = teacher.backbone(batch)
                 # Compute Gram loss on all views in the batch
-                gram_loss = compute_gram_anchoring_loss(student_feats, teacher_feats)
-                loss = loss + training_cfg.gram_weight * gram_loss
+                loss_gram = compute_gram_anchoring_loss(student_feats, teacher_feats)
+                loss = loss + training_cfg.gram_weight * loss_gram
             
             # Gradient accumulation
             loss = loss / args.accumulation_steps
@@ -1100,12 +1138,20 @@ def main() -> None:
             elapsed = time.time() - t0
             steps_per_sec = (step - start_step + 1) / max(elapsed, 1e-6)
             samples_per_sec = steps_per_sec * training_cfg.effective_batch_size
+            current_lr = opt.param_groups[0]["lr"]
             
             print(
                 f"step={step:6d} loss={loss_val:.4f} "
                 f"steps/s={steps_per_sec:.2f} samples/s={samples_per_sec:.1f} "
                 f"elapsed={elapsed:.1f}s"
             )
+            
+            # TensorBoard Scalars
+            tb_writer.add_scalar("Train/Loss_Total", loss_val, step)
+            tb_writer.add_scalar("Train/Loss_Gram", loss_gram.item(), step)
+            tb_writer.add_scalar("Train/LR", current_lr, step)
+            tb_writer.add_scalar("Perf/Samples_Per_Sec", samples_per_sec, step)
+            
             last_log = time.time()
         
         # Anomaly detection
@@ -1129,13 +1175,20 @@ def main() -> None:
             # Rotate old checkpoints
             rotate_checkpoints(run_dir, args.ckpt_keep_last)
         
-        # Monitoring (placeholder for Phase 4 integration)
+        # Monitoring
         if args.monitor_every and (step + 1) % args.monitor_every == 0:
-            print(f"monitor_checkpoint={step+1} (Phase 4 integration pending)")
+            heatmap = make_attention_heatmap(student, batch)
+            tb_writer.add_image("Monitor/Attention", heatmap, step, dataformats="HW")
+            
+            # Log input slice (first channel of first image in batch)
+            input_slice = batch[0, 1, :, :].detach().cpu().numpy() # Middle slice
+            tb_writer.add_image("Monitor/Input", input_slice, step, dataformats="HW")
     
     # ─────────────────────────────────────────────────────────────────────────
     # 7. Final Checkpoint
     # ─────────────────────────────────────────────────────────────────────────
+    
+    tb_writer.close()
     
     final_step = step + 1
     final_path = run_dir / f"checkpoint_final_{final_step:08d}.pth"

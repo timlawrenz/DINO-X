@@ -11,3 +11,4 @@ pillow
 pydicom
 
 # torch (installed per ROCm setup script / wheels)
+tensorboard

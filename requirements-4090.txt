@@ -15,3 +15,4 @@ torchvision
 triton
 typing_extensions==4.15.0
 pydicom==3.0.1
+tensorboard
