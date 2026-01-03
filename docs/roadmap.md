@@ -101,17 +101,47 @@ We don't need 120GB of unique files to test throughput; we need to force the Dat
 
 ## Phase 5: The "Big Run" (Execution)
 
-The 15-day marathon.
+We execute this phase **twice** to validate the process before attempting the memory-breaking Giant run.
 
-- [ ] **Launch Training (Large-first)**: Run a ViT-Large configuration first to validate convergence signals on the 15‑day budget (target effective batch size ≥256 via gradient accumulation).
-- [ ] **Consider Giant Run (After Validation)**: If the Large run shows stable training and improving representation quality, attempt a follow-on ViT-Giant run using the throughput-tuned configuration.
-- [ ] **Daily Health Check**: Briefly check thermal logs and the "Monitor" outputs every morning.
+### Phase 5a: ViT-Large Validation Run (4090)
+
+A focused validation run to verify end-to-end training convergence within budget constraints.
+
+- [x] **Launch Training**: Run ViT-Large on RTX 4090 (24GB) with reduced training steps.
+  - **Configuration**: `--vit-patch 14 --vit-dim 1024 --vit-depth 24 --vit-heads 16 --num-workers 8`
+  - **Training Steps**: 384 steps (192 × 2 accumulation steps)
+  - **Status**: Launched successfully. Fixed critical collapse issue by implementing multi-view augmentation (2 views) and teacher centering (`DINOLoss`).
+  - **Goal**: Verify convergence signals and validate the training process
+- [ ] **Daily Health Check**: Monitor thermal logs and validation outputs.
+
+### Phase 5b: ViT-Giant Production Run (amd395)
+
+The full-scale marathon after validation success.
+
+- [ ] **Launch Training**: Run ViT-Giant on AMD Strix Halo (amd395, 128GB Unified Memory).
+  - **Configuration**: Memory-breaking ViT-Giant configuration (utilizing >24GB VRAM)
+  - **Training Duration**: 15-day marathon with full dataset
+  - **Goal**: Break the 24GB memory wall and train the production foundation model
+- [ ] **Daily Health Check**: Monitor thermal logs and validation outputs throughout the 15-day run.
 
 ## Phase 6: Validation (The Proof)
 
-Did it actually work?
+We execute validation **twice** - once after each Big Run.
+
+### Phase 6a: ViT-Large Validation & Release
+
+Validate the ViT-Large model and release it as open source.
 
 - [ ] **Attention Map Visualization**: Generate heatmaps for 50 random nodules. Do they light up?
 - [ ] **Linear Probe Benchmark**: Freeze the backbone, train a simple classifier layer (Logistic Regression) on the "Malignancy" labels.
   - **Success Criteria**: AUC > 0.90.
-- [ ] **Release**: Document weights and upload to Hugging Face.
+- [ ] **Release**: Document ViT-Large weights and upload to Hugging Face as an open-source validation model.
+
+### Phase 6b: ViT-Giant Validation & Release
+
+Validate the production ViT-Giant model and release it as the flagship foundation model.
+
+- [ ] **Attention Map Visualization**: Generate heatmaps for 50 random nodules. Do they light up?
+- [ ] **Linear Probe Benchmark**: Freeze the backbone, train a simple classifier layer (Logistic Regression) on the "Malignancy" labels.
+  - **Success Criteria**: AUC > 0.90.
+- [ ] **Release**: Document ViT-Giant weights and upload to Hugging Face as the production foundation model.
