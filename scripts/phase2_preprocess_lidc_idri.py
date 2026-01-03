@@ -169,6 +169,11 @@ def main() -> int:
     ap.add_argument("--dicom-root", type=Path, default=Path("data/raw"))
     ap.add_argument("--out-root", type=Path, default=Path("data/processed"))
     ap.add_argument("--max-series", type=int, default=0, help="0 = no limit")
+    ap.add_argument(
+        "--force-reprocess",
+        action="store_true",
+        help="Re-generate PNG slices even if the output series folder already exists",
+    )
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -197,6 +202,20 @@ def main() -> int:
             if series_dir.name.startswith("_"):
                 continue
 
+            series_name = series_dir.as_posix().replace("/", "_")
+            out_series_dir = out_root / "lidc-idri" / series_name
+
+            # Default incremental behavior: if the output folder already exists, skip
+            # PNG generation and only re-index what's already on disk.
+            if not args.force_reprocess and out_series_dir.exists():
+                n = _write_existing_series(out_series_dir, w, series_dir=series_dir)
+                if n >= 3:
+                    print(f"skip=true series_dir={series_dir} reason=already_converted slices={n}")
+                    n_processed += 1
+                    if args.max_series and n_processed >= args.max_series:
+                        break
+                    continue
+
             try:
                 vol = _load_dicom_series(series_dir)
             except RuntimeError as e:
@@ -209,7 +228,6 @@ def main() -> int:
                 )
                 continue
 
-            series_name = series_dir.as_posix().replace("/", "_")
             _write_volume(vol, series_name, out_root, w, series_dir=series_dir)
             n_processed += 1
             if args.max_series and n_processed >= args.max_series:
@@ -218,6 +236,33 @@ def main() -> int:
     print("ok=true")
     print(f"index={index_path}")
     return 0
+
+
+def _write_existing_series(
+    out_series_dir: Path,
+    writer: "csv.writer",
+    *,
+    series_dir: Optional[Path] = None,
+) -> int:
+    # Re-index existing PNG slices from disk.
+    paths = sorted(out_series_dir.glob("slice_*.png"))
+    n = 0
+    for p in paths:
+        stem = p.stem  # slice_0001
+        try:
+            idx = int(stem.split("_", 1)[1])
+        except Exception:
+            continue
+        writer.writerow(
+            [
+                str(p),
+                str(series_dir) if series_dir is not None else out_series_dir.name,
+                idx,
+                f"hu16_i16_offset{HU_OFFSET}_clip{int(HU_CLIP_LO)}_{int(HU_CLIP_HI)}",
+            ]
+        )
+        n += 1
+    return n
 
 
 def _write_volume(

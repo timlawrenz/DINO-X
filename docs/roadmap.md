@@ -72,6 +72,27 @@ Flying blind for 15 days is dangerous. We need instruments.
 - Split manifest generator: `scripts/phase4_make_split_manifest.py`
 - Training monitor: `scripts/phase4_monitor.py`
 
+## Phase 4.5: Hyperparameter Grid Search (Throughput Tuning)
+
+Strix Halo has massive unified memory capacity but comparatively lower memory bandwidth, so we need to experimentally find the throughput "knee of the curve" before starting the Big Run.
+
+**Strategy: "Virtual Inflation"**
+We don't need 120GB of unique files to test throughput; we need to force the DataLoader and GPU to work as if there were 120GB.
+
+- [x] **Build Throughput Tuner**: Add `scripts/tune_throughput.py` that wraps the existing `PngDataset` in a "virtual epoch" loop.
+- [x] **Inflate the Index**: Repeat a small local list of images many times in-memory so the DataLoader sees a very large dataset (e.g., 1,000 images → 1,000,000 samples).
+- [x] **Grid Search Critical Parameters**:
+  - `batch_size`: `[32, 64, 128, 192, 256, 512]` (find OOM threshold)
+  - `num_workers`: `[0, 4, 8, 16, 24, 32]` (find CPU/RAM/unified-bandwidth choke)
+  - `pin_memory`: `[True, False]` (APU behavior; sometimes `False` wins due to zero-copy)
+- [x] **Profile the Bottleneck**: Measure data decode/transform time vs. forward/backward time to classify IO-bound vs compute-bound regimes.
+
+**Implementation links (OpenSpec):**
+- OpenSpec change: `openspec/changes/add-throughput-tuning/proposal.md`
+- Tasks checklist: `openspec/changes/add-throughput-tuning/tasks.md`
+
+**Success Criteria**: Produce a Phase 5 launch configuration that (1) reaches the maximum stable batch size without OOM, and (2) selects `num_workers`/`pin_memory` at the throughput knee so the GPU stays busy without saturating unified memory bandwidth.
+
 ## Phase 5: The "Big Run" (Execution)
 
 The 15-day marathon.
