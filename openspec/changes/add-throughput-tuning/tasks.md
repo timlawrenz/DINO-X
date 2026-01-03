@@ -8,5 +8,5 @@
 
 ## 2. Validation
 - [x] 2.1 Run the tuner on the Phase 3 1,000-image subset and verify it completes at least one full grid sweep.
-- [ ] 2.2 Confirm outputs are reproducible (same ordering, same grid, stable summary) when rerun with the same seed.
+- [x] 2.2 Confirm outputs are reproducible (same ordering, same grid, stable summary) when rerun with the same seed.
 - [x] 2.3 Confirm OOM handling does not crash the runner and correctly records the failure point.
