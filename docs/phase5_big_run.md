@@ -328,6 +328,15 @@ python scripts/phase5_big_run.py \
     --accumulation-steps 8
 ```
 
+### Loss stuck at ~9.01 ("entropy wall")
+
+If `out_dim=8192`, then `ln(out_dim)=9.0109`. A DINO loss that sits near this value for thousands of steps usually means **student and/or teacher outputs are near-uniform**, so the cross-entropy can’t improve.
+
+Try:
+- Increase LR (for effective batch 256, try `--lr 5e-4` or `1e-3`).
+- Inspect checkpoint center/weights: `python scripts/check_checkpoint.py data/runs/<RUN_ID>/checkpoint_*.pth`.
+- Watch TensorBoard entropies (`Train/Entropy_*`) to confirm teacher/student are not saturating.
+
 ### Slow Training
 
 Check num_workers and pin_memory settings:

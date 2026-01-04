@@ -1151,10 +1151,21 @@ def main() -> None:
             
             # TensorBoard Scalars
             tb_writer.add_scalar("Train/Loss_Total", loss_val, step)
+            tb_writer.add_scalar("Train/Loss_DINO", loss_val - training_cfg.gram_weight * loss_gram.item(), step)
             tb_writer.add_scalar("Train/Loss_Gram", loss_gram.item(), step)
+
+            with torch.no_grad():
+                t_prob = F.softmax((teacher_out - dino_loss_fn.center) / args.teacher_temp, dim=-1)
+                s_prob = F.softmax(student_out.detach() / args.student_temp, dim=-1)
+                t_ent = (-t_prob * torch.log(t_prob.clamp_min(1e-12))).sum(dim=-1).mean().item()
+                s_ent = (-s_prob * torch.log(s_prob.clamp_min(1e-12))).sum(dim=-1).mean().item()
+            tb_writer.add_scalar("Train/Entropy_Teacher", t_ent, step)
+            tb_writer.add_scalar("Train/Entropy_Student", s_ent, step)
+
             tb_writer.add_scalar("Train/LR", current_lr, step)
             tb_writer.add_scalar("Perf/Samples_Per_Sec", samples_per_sec, step)
-            
+            tb_writer.flush()
+
             last_log = time.time()
         
         # Anomaly detection
