@@ -823,6 +823,7 @@ def main() -> None:
     
     # Output
     ap.add_argument("--run-dir", type=Path, default=Path("data/runs"))
+    ap.add_argument("--run-suffix", type=str, help="Optional suffix for run directory name for easier identification (e.g., 'amd395_128x2')")
     
     # AMP
     ap.add_argument("--amp", action="store_true", help="Use mixed precision training")
@@ -945,6 +946,8 @@ def main() -> None:
     else:
         # New run
         run_id = time.strftime("%Y%m%d_%H%M%S")
+        if args.run_suffix:
+            run_id = f"{run_id}_{args.run_suffix}"
         run_dir = args.run_dir / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
     
