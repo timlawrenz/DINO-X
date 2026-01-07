@@ -1,9 +1,12 @@
 # Experiments Log
 
-Updated: 2026-01-07 18:12:14
+Updated: 2026-01-07 18:49:35
 
 | Run ID | Model | Eff Batch | LR | Warmup | T-Temp | Status | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| `20260107_181724_4090_warm_up_test` | vit-large (p16) | 256 | 0.0001 | 200 | 0.03 | Running |  |
+| `20260107_181716_4090_warm_up_test` | vit-large (p16) | 256 | 0.0001 | 2500 | 0.03 | Running |  |
+| `20260107_181455_warmup_smoke_test` | vit-large (p14) | 64 | 0.0001 | 200 | 0.04 | Running |  |
 | `20260106_223221_4090_large_teacher0-015` | vit-large (p16) | 256 | 0.0005 |  | 0.015 | Completed |  |
 | `20260104_194515_4090_large_teacher0-03` | vit-large (p16) | 256 | 0.0001 |  | 0.03 | Stopped |  |
 | `20260104_181120_amd395_giant_64x4` | vit-large (p14) | 256 | 0.0005 |  | 0.02 | Completed |  |

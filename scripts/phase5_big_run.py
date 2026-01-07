@@ -537,8 +537,11 @@ def get_lr(
         return base_lr * (step + 1) / warmup_steps
 
     # If total_steps is not defined (unlimited run), just return base_lr after warmup
-    # or if we are past total_steps
-    if total_steps is None or step >= total_steps:
+    if total_steps is None:
+        return base_lr
+    
+    # If we are past total_steps, return min_lr
+    if step >= total_steps:
         return min_lr
 
     # Cosine decay
@@ -1185,7 +1188,7 @@ def main() -> None:
             current_lr = opt.param_groups[0]["lr"]
             
             print(
-                f"step={step:6d} loss={loss_val:.4f} "
+                f"step={step:6d} loss={loss_val:.4f} lr={current_lr:.2e} "
                 f"steps/s={steps_per_sec:.2f} samples/s={samples_per_sec:.1f} "
                 f"elapsed={elapsed:.1f}s"
             )
