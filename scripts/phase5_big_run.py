@@ -30,6 +30,7 @@ import argparse
 import csv
 import hashlib
 import json
+import math
 import os
 import random
 import signal
@@ -186,6 +187,8 @@ class TrainingConfig:
     batch_size: int = 64
     accumulation_steps: int = 1
     lr: float = 1e-4
+    min_lr: float = 1e-6
+    warmup_steps: int = 2500
     weight_decay: float = 0.04
     max_steps: int | None = None
     
@@ -521,6 +524,29 @@ class PngDataset(torch.utils.data.Dataset):
 # Training Loop Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+def get_lr(
+    step: int,
+    total_steps: int,
+    warmup_steps: int,
+    base_lr: float,
+    min_lr: float,
+) -> float:
+    """Compute learning rate with linear warmup and cosine decay."""
+    # Linear warmup
+    if step < warmup_steps:
+        return base_lr * (step + 1) / warmup_steps
+
+    # If total_steps is not defined (unlimited run), just return base_lr after warmup
+    # or if we are past total_steps
+    if total_steps is None or step >= total_steps:
+        return min_lr
+
+    # Cosine decay
+    decay_ratio = (step - warmup_steps) / (total_steps - warmup_steps)
+    coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+    return min_lr + coeff * (base_lr - min_lr)
+
+
 class DINOLoss(nn.Module):
     """DINO loss with centering and sharpening to prevent collapse."""
     def __init__(self, out_dim: int, center_momentum: float = 0.9) -> None:
@@ -793,6 +819,8 @@ def main() -> None:
     ap.add_argument("--batch-size", type=int, default=64)
     ap.add_argument("--accumulation-steps", type=int, default=1)
     ap.add_argument("--lr", type=float, default=1e-4)
+    ap.add_argument("--min-lr", type=float, default=1e-6)
+    ap.add_argument("--warmup-steps", type=int, default=2500)
     ap.add_argument("--weight-decay", type=float, default=0.04)
     ap.add_argument("--max-steps", type=int, help="Maximum training steps (None = unlimited)")
     ap.add_argument("--grad-checkpoint", action="store_true", help="Enable gradient checkpointing (saves memory)")
@@ -891,6 +919,8 @@ def main() -> None:
         batch_size=args.batch_size,
         accumulation_steps=args.accumulation_steps,
         lr=args.lr,
+        min_lr=args.min_lr,
+        warmup_steps=args.warmup_steps,
         weight_decay=args.weight_decay,
         max_steps=args.max_steps,
         ema=args.ema,
@@ -1080,6 +1110,17 @@ def main() -> None:
         if stop.stop:
             print("interrupt=true")
             break
+        
+        # Update learning rate
+        current_lr = get_lr(
+            step=step,
+            total_steps=training_cfg.max_steps,
+            warmup_steps=training_cfg.warmup_steps,
+            base_lr=training_cfg.lr,
+            min_lr=training_cfg.min_lr,
+        )
+        for param_group in opt.param_groups:
+            param_group["lr"] = current_lr
         
         # Data loading: list[tensor, tensor]
         try:
