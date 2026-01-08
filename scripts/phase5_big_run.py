@@ -819,6 +819,7 @@ def main() -> None:
     ap.add_argument("--vit-dim", type=int, help="Custom: model dimension")
     ap.add_argument("--vit-depth", type=int, help="Custom: number of transformer blocks")
     ap.add_argument("--vit-heads", type=int, help="Custom: number of attention heads")
+    ap.add_argument("--out-dim", type=int, help="Override output dimension (default: 8192)")
     
     # Hardware
     ap.add_argument(
@@ -901,8 +902,13 @@ def main() -> None:
         if args.vit_heads:
             model_cfg.heads = args.vit_heads
     
+    # Override out_dim if specified
+    if args.out_dim:
+        model_cfg.out_dim = args.out_dim
+
     print(f"model_config={model_cfg.name} patch={model_cfg.patch} dim={model_cfg.dim} "
-          f"depth={model_cfg.depth} heads={model_cfg.heads} params={model_cfg.params_millions:.1f}M "
+          f"depth={model_cfg.depth} heads={model_cfg.heads} out_dim={model_cfg.out_dim} "
+          f"params={model_cfg.params_millions:.1f}M "
           f"grad_checkpoint={args.grad_checkpoint}")
     
     # Hardware detection
