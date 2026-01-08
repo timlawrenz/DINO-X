@@ -493,31 +493,44 @@ class PngDataset(torch.utils.data.Dataset):
         return windowed
 
     def __getitem__(self, idx: int) -> list[torch.Tensor]:
-        row = self.rows[idx]
-        s = row.series_dir
-        z = row.slice_index
-        z0, z1 = self._series_minmax.get(s, (z, z))
+        # Robust data loading loop
+        attempts = 0
+        while attempts < 10:
+            try:
+                row = self.rows[idx]
+                s = row.series_dir
+                z = row.slice_index
+                z0, z1 = self._series_minmax.get(s, (z, z))
 
-        def _clamp(k: int) -> int:
-            return max(z0, min(z1, k))
+                def _clamp(k: int) -> int:
+                    return max(z0, min(z1, k))
 
-        mp = self._series_map.get(s, {})
-        paths = [
-            mp.get(_clamp(z - 1), row.png_path),
-            mp.get(_clamp(z), row.png_path),
-            mp.get(_clamp(z + 1), row.png_path),
-        ]
+                mp = self._series_map.get(s, {})
+                paths = [
+                    mp.get(_clamp(z - 1), row.png_path),
+                    mp.get(_clamp(z), row.png_path),
+                    mp.get(_clamp(z + 1), row.png_path),
+                ]
 
-        def _get_view():
-            level = random.uniform(self.rw_level_min, self.rw_level_max)
-            width = random.uniform(self.rw_width_min, self.rw_width_max)
+                def _get_view():
+                    level = random.uniform(self.rw_level_min, self.rw_level_max)
+                    width = random.uniform(self.rw_width_min, self.rw_width_max)
+                    
+                    slices = [self._load_hu01(p, level, width) for p in paths]
+                    x = np.stack(slices, axis=0) # (3, H, W)
+                    return torch.from_numpy(x).contiguous()
+
+                # Return two different windowed views for DINO cross-view prediction
+                return [_get_view(), _get_view()]
             
-            slices = [self._load_hu01(p, level, width) for p in paths]
-            x = np.stack(slices, axis=0) # (3, H, W)
-            return torch.from_numpy(x).contiguous()
-
-        # Return two different windowed views for DINO cross-view prediction
-        return [_get_view(), _get_view()]
+            except Exception as e:
+                print(f"⚠️  Data loading error at index {idx} ({self.rows[idx].png_path}): {e}")
+                # Pick a new random index
+                idx = random.randint(0, len(self.rows) - 1)
+                attempts += 1
+        
+        # Fallback if 10 attempts fail (unlikely)
+        raise RuntimeError("Failed to load data after 10 attempts")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
