@@ -1157,11 +1157,15 @@ def main() -> None:
         
         # Forward pass
         with torch.amp.autocast("cuda", enabled=scaler.is_enabled()):
-            student_out = student(batch)
+            # Get features for both DINO and Gram losses
+            student_feats = student.backbone(batch)
             with torch.no_grad():
-                teacher_out = teacher(batch)
+                teacher_feats = teacher.backbone(batch)
             
-            # DINO loss with centering, sharpening, and cross-view prediction
+            # DINO loss: use CLS token through projection head
+            student_out = student.head(student_feats[:, 0])
+            teacher_out = teacher.head(teacher_feats[:, 0])
+            
             loss = dino_loss_fn(
                 student_out,
                 teacher_out,
@@ -1172,10 +1176,7 @@ def main() -> None:
             # Gram anchoring (optional but enabled)
             loss_gram = torch.tensor(0.0, device=device)
             if training_cfg.gram_enabled:
-                student_feats = student.backbone(batch)
-                with torch.no_grad():
-                    teacher_feats = teacher.backbone(batch)
-                # Compute Gram loss on all views in the batch
+                # Reuse features from above - no double forward
                 loss_gram = compute_gram_anchoring_loss(student_feats, teacher_feats)
                 loss = loss + training_cfg.gram_weight * loss_gram
             
@@ -1184,6 +1185,10 @@ def main() -> None:
         
         # Backward
         scaler.scale(loss).backward()
+        
+        # ROCm safety: synchronize after backward to catch errors early
+        if torch.cuda.is_available() and hasattr(torch.version, 'hip') and torch.version.hip:
+            torch.cuda.synchronize()
         
         # Optimizer step (every accumulation_steps)
         if (step + 1) % args.accumulation_steps == 0:
