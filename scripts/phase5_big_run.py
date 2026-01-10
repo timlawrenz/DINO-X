@@ -1194,7 +1194,7 @@ def main() -> None:
         if (step + 1) % args.accumulation_steps == 0:
             scaler.step(opt)
             scaler.update()
-            opt.zero_grad()
+            opt.zero_grad(set_to_none=True)
             
             # EMA update teacher
             with torch.no_grad():
