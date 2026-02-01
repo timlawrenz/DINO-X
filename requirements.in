@@ -10,5 +10,6 @@ numpy
 pillow
 pydicom
 
-# torch (installed per ROCm setup script / wheels)
+# torch/torchvision/torchaudio are installed per ROCm/CUDA setup scripts / wheels
+
 tensorboard

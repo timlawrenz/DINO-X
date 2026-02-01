@@ -10,6 +10,8 @@ This guide covers executing Phase 5 production training for both validation (Pha
 
 Phase 5 implements a unified, parameterized training script (`scripts/phase5_big_run.py`) that supports:
 
+- **Label-free validation (recommended):** run `scripts/phase5_view_retrieval_eval.py` on any checkpoint to measure whether two augmented views of the *same slice* retrieve each other in embedding space (Top-1/Top-k vs random baseline).
+
 - **Phase 5a**: ViT-Large validation run (384 steps) on RTX 4090
 - **Phase 5b**: ViT-Giant production run (15-day marathon) on AMD Strix Halo (amd395)
 - Hardware-agnostic checkpoints (train on one GPU, resume on another)
@@ -164,6 +166,24 @@ python scripts/phase5_big_run.py \
     --config vit-giant \
     --ckpt-keep-last 10  # Keep last 10 checkpoints
 ```
+
+## Label-free Validation (No Labels Required)
+
+After you have a checkpoint, you can run a **label-free view-retrieval evaluation** on the validation split:
+
+```bash
+python scripts/phase5_view_retrieval_eval.py \
+  --checkpoint data/runs/YYYYMMDD_HHMMSS/checkpoint_00001000.pth \
+  --split-manifest data/processed/_splits/val10_seed0.json \
+  --index-csv data/processed/_index/index.csv \
+  --n 4096
+```
+
+**Interpretation:**
+- `top1` is retrieval accuracy (query=view1, keys=view2; correct key is same index).
+- `baseline` is ~`1/n`.
+- `ratio` is `top1 / baseline`.
+- The script exits **0 on pass** and **2 on fail**, and writes a `view_retrieval_step*_N*.json` metrics file.
 
 ## Advanced Usage
 
