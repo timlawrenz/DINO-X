@@ -233,8 +233,9 @@ class TrainingConfig:
     ema: float = 0.996
     teacher_temp: float = 0.04
     student_temp: float = 0.1
+    center_momentum: float = 0.9
     
-    # Gram anchoring - ALWAYS ENABLED (required for medical imaging)
+    # Gram anchoring - ALWAYS ENABLED (REQUIRED for medical imaging)
     # Without Gram Anchoring, the model will collapse on CT scans
     gram_enabled: bool = True  # DO NOT CHANGE - hardcoded to True
     gram_weight: float = 1.0
@@ -633,7 +634,7 @@ def get_lr(
 
 class DINOLoss(nn.Module):
     """DINO loss with centering and sharpening to prevent collapse."""
-    def __init__(self, out_dim: int, center_momentum: float = 0.9) -> None:
+    def __init__(self, out_dim: int, center_momentum: float = 0.999) -> None:
         super().__init__()
         self.center_momentum = center_momentum
         self.register_buffer("center", torch.zeros(1, out_dim))
@@ -914,6 +915,7 @@ def main() -> None:
     ap.add_argument("--ema", type=float, default=0.996)
     ap.add_argument("--teacher-temp", type=float, default=0.04)
     ap.add_argument("--student-temp", type=float, default=0.1)
+    ap.add_argument("--center-momentum", type=float, default=0.9, help="Momentum for DINO centering (default: 0.9, recommended: 0.999 for stability)")
     
     # Gram anchoring (REQUIRED for medical imaging - DO NOT DISABLE)
     ap.add_argument("--gram-weight", type=float, default=1.0, help="Gram Anchoring weight (default: 1.0)")
@@ -976,6 +978,7 @@ def main() -> None:
 
     print(f"model_config={model_cfg.name} patch={model_cfg.patch} dim={model_cfg.dim} "
           f"depth={model_cfg.depth} heads={model_cfg.heads} out_dim={model_cfg.out_dim} "
+          f"entropy_wall={math.log(model_cfg.out_dim):.4f} "
           f"params={model_cfg.params_millions:.1f}M "
           f"grad_checkpoint={args.grad_checkpoint}")
     
@@ -1016,6 +1019,7 @@ def main() -> None:
         ema=args.ema,
         teacher_temp=args.teacher_temp,
         student_temp=args.student_temp,
+        center_momentum=args.center_momentum,
         gram_enabled=True,  # Always enabled - required for medical imaging
         gram_weight=args.gram_weight,
         ckpt_every=args.ckpt_every,
@@ -1157,7 +1161,7 @@ def main() -> None:
     
     opt = torch.optim.AdamW(student.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scaler = torch.amp.GradScaler("cuda", enabled=bool(args.amp and device.type == "cuda"))
-    dino_loss_fn = DINOLoss(model_cfg.out_dim).to(device)
+    dino_loss_fn = DINOLoss(model_cfg.out_dim, center_momentum=training_cfg.center_momentum).to(device)
     
     start_step = 0
     
