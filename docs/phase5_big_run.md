@@ -168,7 +168,6 @@ python scripts/phase5_big_run.py \
 ```
 
 ## Label-free Validation (No Labels Required)
-
 After you have a checkpoint, you can run a **label-free view-retrieval evaluation** on the validation split:
 
 ```bash
@@ -184,6 +183,18 @@ python scripts/phase5_view_retrieval_eval.py \
 - `baseline` is ~`1/n`.
 - `ratio` is `top1 / baseline`.
 - The script exits **0 on pass** and **2 on fail**, and writes a `view_retrieval_step*_N*.json` metrics file.
+
+## Augmentation Strategy & Convergence
+
+**Critical Finding (2026-02-01):**
+Early attempts at training DINOv3 on LIDC-IDRI failed (Retrieval Ratio ~1.0) because the pipeline relied solely on **intensity augmentations** (random windowing). The model simply memorized pixel coordinates or high-level boundaries ("structural bias") without learning semantic features, leading to beautiful but empty attention maps.
+
+The fix was introducing **Strong Spatial Augmentations** (matching standard DINO/ImageNet recipes):
+- `RandomResizedCrop(scale=(0.5, 1.0))`
+- `RandomHorizontalFlip(p=0.5)`
+
+This forces the model to learn features invariant to zoom and position.
+- **Run `nano_aug_test` (2026-02-01):** Achieved **Ratio 3.0** at step 1600 (approx. 100 weight updates), marking the first proof of semantic learning on this dataset.
 
 ## Advanced Usage
 

@@ -47,7 +47,8 @@ We utilize DINOv3 (August 2025), specifically enabling Gram Anchoring.
 
 We define success not just by "the code runs," but by three scientific benchmarks:
 
-0. **Label-free Representation Check (early gate):** a two-view retrieval eval (`scripts/phase5_view_retrieval_eval.py`) should beat random baseline on a held-out split (no labels required). This is used to prevent "training blind" before investing in any labeling workflow.
+0. **Label-free Representation Check (early gate):** a two-view retrieval eval (`scripts/phase5_view_retrieval_eval.py`) should beat random baseline on a held-out split (no labels required).
+   - **Status:** ✅ PASSED (2026-02-01). Run `nano_aug_test` achieved Ratio 3.0x at step 1600.
 
 1. **Linear Probe Accuracy:** A simple logistic regression trained on top of the frozen backbone must achieve > 0.90 AUC on nodule malignancy detection.
 

@@ -63,6 +63,7 @@ try:
     import torch.nn as nn
     import torch.nn.functional as F
     from torch.utils.tensorboard import SummaryWriter
+    from torchvision import transforms
 except Exception:
     _need("torch")
 
@@ -81,9 +82,13 @@ def make_attention_heatmap(
         feats = model.backbone(batch[0:1]) # (1, N+1, D)
     model.train()
     
-    # L2 norm of patch tokens (skip CLS)
-    patch_tokens = feats[:, 1:, :] # (1, N, D)
-    norms = torch.norm(patch_tokens, dim=-1).squeeze(0) # (N,)
+    # L2 norm of patch tokens (skip CLS and skip Registers if present)
+    # feats: (1, N_total, D)
+    # Patches are at [1 : 1+N_patches]
+    num_patches = model.backbone.patch_embed.grid_size[0] * model.backbone.patch_embed.grid_size[1] if hasattr(model.backbone.patch_embed, 'grid_size') else int((model.backbone.img_size // model.backbone.patch)**2)
+    
+    patch_tokens = feats[:, 1 : 1 + num_patches, :] # (1, N_patches, D)
+    norms = torch.norm(patch_tokens, dim=-1).squeeze(0) # (N_patches,)
     
     # Normalize to [0, 1]
     norms = (norms - norms.min()) / (norms.max() - norms.min() + 1e-8)
@@ -96,6 +101,38 @@ def make_attention_heatmap(
     # We return the small heatmap; TensorBoard handles resizing if needed,
     # or we can rely on the viewer. 
     return heatmap
+
+
+def make_gram_heatmap(
+    model: DinoStudentTeacher,
+    batch: torch.Tensor,
+) -> np.ndarray:
+    """Generate Gram matrix visualization for the first image in batch."""
+    model.eval()
+    with torch.no_grad():
+        feats = model.backbone(batch[0:1]) # (1, N+1, D)
+    model.train()
+    
+    # Compute Gram matrix of patch tokens (skip CLS)
+    # feats: (1, N+1, D) -> patches: (1, N, D)
+    patches = feats[:, 1:, :] 
+    
+    # Normalize features first (standard Gram practice)
+    patches = F.normalize(patches, p=2, dim=-1)
+    
+    # Gram: (1, N, N)
+    gram = torch.bmm(patches, patches.transpose(1, 2)).squeeze(0) # (N, N)
+    
+    # Convert to numpy
+    gram_np = gram.cpu().numpy()
+    
+    # Contrast Stretching: Map [min, max] to [0, 1]
+    g_min = gram_np.min()
+    g_max = gram_np.max()
+    gram_img = (gram_np - g_min) / (g_max - g_min + 1e-8)
+    
+    return gram_img
+
 
 
 
@@ -336,6 +373,7 @@ class PatchViT(nn.Module):
         heads: int = 6,
         mlp_ratio: float = 4.0,
         use_grad_checkpoint: bool = False,
+        num_registers: int = 4,
     ) -> None:
         super().__init__()
         assert img_size % patch == 0
@@ -343,17 +381,40 @@ class PatchViT(nn.Module):
         self.patch = patch
         self.dim = dim
         self.use_grad_checkpoint = use_grad_checkpoint
+        self.num_registers = num_registers
 
         self.patch_embed = nn.Conv2d(3, dim, kernel_size=patch, stride=patch, bias=True)
         n_patches = (img_size // patch) * (img_size // patch)
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, dim))
         self.pos_embed = nn.Parameter(torch.zeros(1, 1 + n_patches, dim))
+        
+        if num_registers > 0:
+            self.registers = nn.Parameter(torch.zeros(1, num_registers, dim))
 
         self.blocks = nn.ModuleList([
             TransformerBlock(dim, heads, mlp_ratio) for _ in range(depth)
         ])
         self.norm = nn.LayerNorm(dim)
+        
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+        
+        # Specific init for tokens
+        nn.init.trunc_normal_(self.pos_embed, std=0.1)
+        nn.init.trunc_normal_(self.cls_token, std=0.02)
+        nn.init.trunc_normal_(self.patch_embed.weight, std=0.02)
+        
+        if self.num_registers > 0:
+            nn.init.trunc_normal_(self.registers, std=0.02)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B = x.size(0)
@@ -363,6 +424,13 @@ class PatchViT(nn.Module):
         cls_tokens = self.cls_token.expand(B, -1, -1)
         x = torch.cat([cls_tokens, x], dim=1)
         x = x + self.pos_embed
+        
+        if self.num_registers > 0:
+            regs = self.registers.expand(B, -1, -1)
+            # Concatenate registers AFTER pos embedding (they don't need pos info usually, or it's shared)
+            # Standard: [CLS, PATCHES, REGISTERS] or [CLS, REGISTERS, PATCHES]?
+            # DINOv2: [CLS, PATCHES, REGISTERS] is common so they don't mess up pos indices.
+            x = torch.cat([x, regs], dim=1)
 
         for blk in self.blocks:
             if self.use_grad_checkpoint and self.training:
@@ -458,6 +526,12 @@ class PngDataset(torch.utils.data.Dataset):
         self.rw_width_min = rw_width_min
         self.rw_width_max = rw_width_max
 
+        self.transform = transforms.Compose([
+            transforms.RandomResizedCrop(img_size, scale=(0.5, 1.0), interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.RandomHorizontalFlip(),
+            transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+        ])
+
         # Map series for 3-slice context (z-1, z, z+1)
         self._series_map: dict[str, dict[int, Path]] = {}
         self._series_minmax: dict[str, tuple[int, int]] = {}
@@ -483,12 +557,6 @@ class PngDataset(torch.utils.data.Dataset):
         wmax = level + width / 2.0
         windowed = (hu - wmin) / max(width, 1.0)
         windowed = np.clip(windowed, 0.0, 1.0)
-        
-        # Resize to model input size
-        if windowed.shape != (self.img_size, self.img_size):
-            img_pil = Image.fromarray((windowed * 255).astype(np.uint8))
-            img_pil = img_pil.resize((self.img_size, self.img_size), Image.Resampling.BILINEAR)
-            windowed = np.array(img_pil, dtype=np.float32) / 255.0
             
         return windowed
 
@@ -518,7 +586,7 @@ class PngDataset(torch.utils.data.Dataset):
                     
                     slices = [self._load_hu01(p, level, width) for p in paths]
                     x = np.stack(slices, axis=0) # (3, H, W)
-                    return torch.from_numpy(x).contiguous()
+                    return self.transform(torch.from_numpy(x).contiguous())
 
                 # Return two different windowed views for DINO cross-view prediction
                 return [_get_view(), _get_view()]
@@ -1039,6 +1107,13 @@ def main() -> None:
         rw_width_min=training_cfg.rw_width_min,
         rw_width_max=training_cfg.rw_width_max,
     )
+    
+    if len(ds) < args.batch_size:
+        print(f"⚠️  Dataset size ({len(ds)}) is smaller than batch size ({args.batch_size}).")
+        print(f"    Reducing batch size to {len(ds)} to prevent training failure.")
+        args.batch_size = len(ds)
+        training_cfg.batch_size = args.batch_size
+
     dl = torch.utils.data.DataLoader(
         ds,
         batch_size=args.batch_size,
@@ -1265,6 +1340,71 @@ def main() -> None:
             # Log input slice (first channel of first image in batch)
             input_slice = batch[0, 1, :, :].detach().cpu().numpy() # Middle slice
             tb_writer.add_image("Monitor/Input", input_slice, step, dataformats="HW")
+
+            # Create Combined Image (Side-by-Side)
+            try:
+                # Convert input slice (float 0-1) to uint8 0-255
+                img_h, img_w = input_slice.shape
+                input_uint8 = (np.clip(input_slice, 0, 1) * 255).astype(np.uint8)
+                input_pil = Image.fromarray(input_uint8, mode='L').convert('RGB')
+
+                # Resize heatmap (float 0-1) to match input size and apply colormap simulation (red)
+                # We'll just keep it grayscale for simplicity or simple red overlay if we wanted, 
+                # but for side-by-side grayscale is clearest.
+                heatmap_uint8 = (np.clip(heatmap, 0, 1) * 255).astype(np.uint8)
+                heatmap_pil = Image.fromarray(heatmap_uint8, mode='L').resize((img_w, img_h), resample=Image.Resampling.NEAREST).convert('RGB')
+
+                # Stitch
+                combined = Image.new('RGB', (img_w * 2, img_h))
+                combined.paste(input_pil, (0, 0))
+                combined.paste(heatmap_pil, (img_w, 0))
+
+                # Convert back to CHW for TensorBoard (or HWC if using dataformats='HWC')
+                # tb_writer.add_image expects CHW by default or HW.
+                # Let's use HWC string for HWC array.
+                combined_np = np.array(combined)
+                tb_writer.add_image("Monitor/Combined", combined_np, step, dataformats="HWC")
+
+            except Exception as e:
+                print(f"⚠️  Monitoring visualization error: {e}")
+            
+            # Log Gram Matrix
+            try:
+                # Debug stats
+                with torch.no_grad():
+                    # Re-compute gram for stats (or we could have returned it)
+                    model_s = student
+                    model_s.eval()
+                    
+                    # 1. Check Embedding Layer (Start)
+                    # We need to manually call patch_embed + pos_embed to check early diversity
+                    x_in = batch[0:1]
+                    x_emb = model_s.backbone.patch_embed(x_in)
+                    x_emb = x_emb.flatten(2).transpose(1, 2)
+                    # Add CLS + Pos (simplifying just to check patch diversity)
+                    # x_emb is (1, N, D). Let's check std across N.
+                    emb_std = x_emb.std(dim=1).mean().item()
+                    
+                    # 2. Check Backbone Output (End)
+                    feats = model_s.backbone(x_in)
+                    patches = feats[:, 1:, :]
+                    patches_norm = F.normalize(patches, p=2, dim=-1)
+                    gram = torch.bmm(patches_norm, patches_norm.transpose(1, 2)).squeeze(0)
+                    
+                    g_min, g_max, g_mean = gram.min().item(), gram.max().item(), gram.mean().item()
+                    
+                    # Input stats
+                    img = batch[0]
+                    i_min, i_max, i_mean = img.min().item(), img.max().item(), img.mean().item()
+                    
+                    print(f" [Monitor] Input: min={i_min:.4f} max={i_max:.4f} mean={i_mean:.4f}")
+                    print(f" [Monitor] Embed-L0 Diversity: std={emb_std:.6f} (If 0, PatchEmbed is broken)")
+                    print(f" [Monitor] Output Gram: mean={g_mean:.4f} (If 1, Attention collapsed)")
+
+                gram_img = make_gram_heatmap(student, batch)
+                tb_writer.add_image("Monitor/Gram", gram_img, step, dataformats="HW")
+            except Exception as e:
+                print(f"⚠️  Gram visualization error: {e}")
     
     # ─────────────────────────────────────────────────────────────────────────
     # 7. Final Checkpoint
