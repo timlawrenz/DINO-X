@@ -172,6 +172,15 @@ class ModelConfig:
 
 # Model configuration presets
 MODEL_CONFIGS = {
+    "vit-small": ModelConfig(
+        name="vit-small",
+        patch=14,
+        dim=384,
+        depth=12,
+        heads=6,
+        mlp_ratio=4.0,
+        out_dim=8192,
+    ),
     "vit-large": ModelConfig(
         name="vit-large",
         patch=14,
@@ -235,10 +244,13 @@ class TrainingConfig:
     student_temp: float = 0.1
     center_momentum: float = 0.9
     
-    # Gram anchoring - ALWAYS ENABLED (REQUIRED for medical imaging)
+    loss_type: str = "dino"
+    
+    # Gram anchoring - ALWAYS ENABLED (required for medical imaging)
     # Without Gram Anchoring, the model will collapse on CT scans
     gram_enabled: bool = True  # DO NOT CHANGE - hardcoded to True
     gram_weight: float = 1.0
+    koleo_weight: float = 0.0
     
     # Checkpointing
     ckpt_every: int = 100
@@ -695,6 +707,290 @@ def compute_gram_anchoring_loss(
     return loss
 
 
+class KoLeoLoss(nn.Module):
+    """Kozachenko-Leonenko differential entropy regularization.
+    
+    Forces features to be uniformly distributed on the hypersphere, preventing collapse.
+    """
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, student_output: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+        """
+        student_output: (B, D) tensor of features (CLS tokens).
+        """
+        # Normalize features
+        x = F.normalize(student_output, p=2, dim=-1)
+        
+        # Compute pairwise distances
+        # dist(i, j) = 2 - 2 * cos(i, j)
+        # We can just use pdist
+        pdist = torch.cdist(x, x, p=2) # (B, B)
+        
+        # Mask diagonal (distance to self is 0)
+        B = x.shape[0]
+        # Create a mask with infinity on diagonal
+        eye = torch.eye(B, device=x.device)
+        pdist = pdist + eye * 1e9
+        
+        # Find distance to nearest neighbor for each sample
+        min_dist, _ = pdist.min(dim=1) # (B,)
+        
+        # Maximize entropy = Maximize log(min_dist) = Minimize -log(min_dist)
+        loss = -torch.log(min_dist + eps).mean()
+        return loss
+
+
+class SimCLRLoss(nn.Module):
+    """SimCLR / NT-Xent Loss.
+    
+    Explicitly uses negative samples from the batch to prevent collapse.
+    robust, but requires large batch sizes (which we have via accumulation).
+    """
+    def __init__(self, temperature: float = 0.1) -> None:
+        super().__init__()
+        self.temperature = temperature
+
+    def forward(self, z1: torch.Tensor, z2: torch.Tensor) -> torch.Tensor:
+        """
+        z1, z2: (B, D) feature vectors from view 1 and view 2.
+        """
+        z1 = F.normalize(z1, dim=1)
+        z2 = F.normalize(z2, dim=1)
+        
+        # Concatenate: (2B, D)
+        features = torch.cat([z1, z2], dim=0)
+        B = z1.shape[0]
+        
+        # Similarity matrix: (2B, 2B)
+        sim_matrix = torch.matmul(features, features.T) / self.temperature
+        
+        # Mask out self-similarity
+        mask = torch.eye(2 * B, device=features.device).bool()
+        sim_matrix.masked_fill_(mask, -9e15)
+        
+        # Positive targets
+        # For i in 0..B-1 (z1), positive is i+B (z2)
+        # For i in B..2B-1 (z2), positive is i-B (z1)
+        target = torch.cat([
+            torch.arange(B, 2 * B, device=features.device),
+            torch.arange(0, B, device=features.device)
+        ], dim=0)
+        
+        loss = F.cross_entropy(sim_matrix, target)
+        return loss
+
+
+class MaeDecoder(nn.Module):
+    """Lightweight decoder for MAE reconstruction."""
+    def __init__(
+        self,
+        embed_dim: int,
+        patch_size: int,
+        num_patches: int,
+        decoder_dim: int = 512,
+        decoder_depth: int = 8,
+        decoder_heads: int = 16,
+        mlp_ratio: float = 4.0,
+    ) -> None:
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.decoder_dim = decoder_dim
+        self.num_patches = num_patches
+        self.patch_size = patch_size
+
+        self.decoder_embed = nn.Linear(embed_dim, decoder_dim, bias=True)
+        self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_dim))
+        
+        # Fixed 2D sin-cos pos embedding for decoder (recomputed on init)
+        self.decoder_pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, decoder_dim), requires_grad=False)
+
+        self.blocks = nn.ModuleList([
+            TransformerBlock(decoder_dim, decoder_heads, mlp_ratio) for _ in range(decoder_depth)
+        ])
+        
+        self.decoder_norm = nn.LayerNorm(decoder_dim)
+        self.decoder_pred = nn.Linear(decoder_dim, patch_size**2 * 3, bias=True) 
+
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+        nn.init.normal_(self.mask_token, std=0.02)
+
+    def forward(self, x: torch.Tensor, ids_restore: torch.Tensor) -> torch.Tensor:
+        # Embed latent tokens
+        x = self.decoder_embed(x)
+
+        # Append mask tokens to sequence
+        mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1)
+        x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token
+        x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle
+        x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token
+
+        # Add pos embed
+        x = x + self.decoder_pos_embed
+
+        # Apply Transformer blocks
+        for blk in self.blocks:
+            x = blk(x)
+        x = self.decoder_norm(x)
+
+        # Predict pixels
+        x = self.decoder_pred(x)
+        return x[:, 1:, :] # remove cls token
+
+
+class MaeModel(nn.Module):
+    """MAE Wrapper: Encoder + Masking + Decoder."""
+    def __init__(self, encoder: PatchViT, decoder_dim: int = 512, mask_ratio: float = 0.75):
+        super().__init__()
+        self.encoder = encoder
+        self.mask_ratio = mask_ratio
+        
+        # Infer patch count
+        img_size = encoder.img_size
+        patch_size = encoder.patch
+        num_patches = (img_size // patch_size) ** 2
+        
+        self.decoder = MaeDecoder(
+            embed_dim=encoder.dim,
+            patch_size=patch_size,
+            num_patches=num_patches,
+            decoder_dim=decoder_dim
+        )
+        
+        # Initialize decoder pos embed (simple sin-cos)
+        self.decoder.decoder_pos_embed.data.copy_(
+            self._get_2d_sincos_pos_embed(self.decoder.decoder_pos_embed.shape[-1], int(num_patches**0.5), cls_token=True)
+        )
+
+    def _get_2d_sincos_pos_embed(self, embed_dim, grid_size, cls_token=False):
+        # Simplified numpy-based init
+        grid_h = np.arange(grid_size, dtype=np.float32)
+        grid_w = np.arange(grid_size, dtype=np.float32)
+        grid = np.meshgrid(grid_w, grid_h)  # here w goes first
+        grid = np.stack(grid, axis=0)
+
+        grid = grid.reshape([2, 1, grid_size, grid_size])
+        pos_embed = self._get_2d_sincos_pos_embed_from_grid(embed_dim, grid)
+        if cls_token:
+            pos_embed = np.concatenate([np.zeros([1, embed_dim]), pos_embed], axis=0)
+        return torch.from_numpy(pos_embed).float().unsqueeze(0)
+
+    def _get_2d_sincos_pos_embed_from_grid(self, embed_dim, grid):
+        assert embed_dim % 2 == 0
+        emb_h = self._get_1d_sincos_pos_embed_from_grid(embed_dim // 2, grid[0])  # (H*W, D/2)
+        emb_w = self._get_1d_sincos_pos_embed_from_grid(embed_dim // 2, grid[1])  # (H*W, D/2)
+        emb = np.concatenate([emb_h, emb_w], axis=1) # (H*W, D)
+        return emb
+
+    def _get_1d_sincos_pos_embed_from_grid(self, embed_dim, pos):
+        assert embed_dim % 2 == 0
+        omega = np.arange(embed_dim // 2, dtype=np.float32)
+        omega /= embed_dim / 2.
+        omega = 1. / 10000**omega  # (D/2,)
+
+        pos = pos.reshape(-1)  # (M,)
+        out = np.einsum('m,d->md', pos, omega)  # (M, D/2)
+
+        emb_sin = np.sin(out) # (M, D/2)
+        emb_cos = np.cos(out) # (M, D/2)
+
+        emb = np.concatenate([emb_sin, emb_cos], axis=1)  # (M, D)
+        return emb
+
+    def patchify(self, imgs):
+        """
+        imgs: (N, 3, H, W)
+        x: (N, L, patch_size**2 *3)
+        """
+        p = self.encoder.patch
+        assert imgs.shape[2] == imgs.shape[3] and imgs.shape[2] % p == 0
+
+        h = w = imgs.shape[2] // p
+        x = imgs.reshape(shape=(imgs.shape[0], 3, h, p, w, p))
+        x = torch.einsum('nchpwq->nhwpqc', x)
+        x = x.reshape(shape=(imgs.shape[0], h * w, p**2 * 3))
+        return x
+
+    def forward_loss(self, imgs, pred, mask):
+        """
+        imgs: [N, 3, H, W]
+        pred: [N, L, p*p*3]
+        mask: [N, L], 0 is keep, 1 is remove, 
+        """
+        target = self.patchify(imgs)
+        
+        # Mean over patch pixels?
+        # We compute MSE per patch
+        loss = (pred - target) ** 2
+        loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
+
+        loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
+        return loss
+
+    def random_masking(self, x, mask_ratio):
+        """
+        x: [N, L, D], sequence
+        """
+        N, L, D = x.shape  # batch, length, dim
+        len_keep = int(L * (1 - mask_ratio))
+        
+        noise = torch.rand(N, L, device=x.device)  # noise in [0, 1]
+        
+        # sort noise for each sample
+        ids_shuffle = torch.argsort(noise, dim=1)  # ascend: small is keep, large is remove
+        ids_restore = torch.argsort(ids_shuffle, dim=1)
+
+        # keep the first subset
+        ids_keep = ids_shuffle[:, :len_keep]
+        x_masked = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D))
+
+        # generate the binary mask: 0 is keep, 1 is remove
+        mask = torch.ones([N, L], device=x.device)
+        mask[:, :len_keep] = 0
+        # unshuffle to get the binary mask
+        mask = torch.gather(mask, dim=1, index=ids_restore)
+
+        return x_masked, mask, ids_restore
+
+    def forward(self, imgs):
+        # 1. Patch Embed
+        x = self.encoder.patch_embed(imgs)
+        x = x.flatten(2).transpose(1, 2)
+        
+        # 2. Add Pos Embed (before masking!)
+        # encoder.pos_embed has CLS. We need to handle it.
+        # x is (B, N, D). pos_embed is (1, N+1, D).
+        pos_embed_sans_cls = self.encoder.pos_embed[:, 1:, :]
+        x = x + pos_embed_sans_cls
+
+        # 3. Masking
+        x_masked, mask, ids_restore = self.random_masking(x, self.mask_ratio)
+
+        # 4. Append CLS token
+        cls_token = self.encoder.cls_token + self.encoder.pos_embed[:, :1, :]
+        cls_tokens = cls_token.expand(x.shape[0], -1, -1)
+        x_masked = torch.cat([cls_tokens, x_masked], dim=1)
+
+        # 5. Encoder Blocks
+        for blk in self.encoder.blocks:
+            x_masked = blk(x_masked)
+        x_masked = self.encoder.norm(x_masked)
+
+        # 6. Decoder
+        pred = self.decoder(x_masked, ids_restore)
+        
+        return pred, mask
+
+
 class _StopFlag:
     """Signal handler flag."""
     def __init__(self):
@@ -919,7 +1215,11 @@ def main() -> None:
     
     # Gram anchoring (REQUIRED for medical imaging - DO NOT DISABLE)
     ap.add_argument("--gram-weight", type=float, default=1.0, help="Gram Anchoring weight (default: 1.0)")
+    ap.add_argument("--koleo-weight", type=float, default=0.0, help="KoLeo regularization weight (default: 0.0)")
     
+    # Loss Type
+    ap.add_argument("--loss-type", choices=["dino", "simclr", "mae"], default="dino", help="Objective function")
+
     # Checkpointing
     ap.add_argument("--ckpt-every", type=int, default=100)
     ap.add_argument("--ckpt-keep-last", type=int, default=5)
@@ -1020,8 +1320,10 @@ def main() -> None:
         teacher_temp=args.teacher_temp,
         student_temp=args.student_temp,
         center_momentum=args.center_momentum,
+        loss_type=args.loss_type,
         gram_enabled=True,  # Always enabled - required for medical imaging
         gram_weight=args.gram_weight,
+        koleo_weight=args.koleo_weight,
         ckpt_every=args.ckpt_every,
         ckpt_keep_last=args.ckpt_keep_last,
         monitor_every=args.monitor_every,
@@ -1162,6 +1464,20 @@ def main() -> None:
     opt = torch.optim.AdamW(student.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scaler = torch.amp.GradScaler("cuda", enabled=bool(args.amp and device.type == "cuda"))
     dino_loss_fn = DINOLoss(model_cfg.out_dim, center_momentum=training_cfg.center_momentum).to(device)
+    koleo_loss_fn = KoLeoLoss().to(device)
+    simclr_loss_fn = SimCLRLoss(temperature=0.1).to(device)
+    
+    mae_model: MaeModel | None = None
+    if args.loss_type == "mae":
+        mae_model = MaeModel(vit_s, mask_ratio=0.75).to(device)
+        # In MAE mode, we optimize the whole MaeModel (encoder+decoder)
+        # Note: We reuse 'vit_s' as the encoder backbone inside MaeModel
+        opt = torch.optim.AdamW(mae_model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    else:
+        # DINO/SimCLR mode
+        opt = torch.optim.AdamW(student.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+
+    scaler = torch.amp.GradScaler("cuda", enabled=bool(args.amp and device.type == "cuda"))
     
     start_step = 0
     
@@ -1236,29 +1552,59 @@ def main() -> None:
         
         # Forward pass
         with torch.amp.autocast("cuda", enabled=scaler.is_enabled()):
-            # Get features for both DINO and Gram losses
-            student_feats = student.backbone(batch)
-            with torch.no_grad():
-                teacher_feats = teacher.backbone(batch)
-            
-            # DINO loss: use CLS token through projection head
-            student_out = student.head(student_feats[:, 0])
-            teacher_out = teacher.head(teacher_feats[:, 0])
-            
-            loss = dino_loss_fn(
-                student_out,
-                teacher_out,
-                args.student_temp,
-                args.teacher_temp,
-            )
-            
-            # Gram anchoring (optional but enabled)
+            loss_dino = torch.tensor(0.0, device=device)
+            loss_simclr = torch.tensor(0.0, device=device)
+            loss_mae = torch.tensor(0.0, device=device)
             loss_gram = torch.tensor(0.0, device=device)
-            if training_cfg.gram_enabled:
-                # Reuse features from above - no double forward
-                loss_gram = compute_gram_anchoring_loss(student_feats, teacher_feats)
-                loss = loss + training_cfg.gram_weight * loss_gram
+            loss_koleo = torch.tensor(0.0, device=device)
+
+            if training_cfg.loss_type == "mae":
+                pred, mask = mae_model(batch)
+                loss = mae_model.forward_loss(batch, pred, mask)
+                loss_mae = loss
+            elif training_cfg.loss_type == "simclr":
+                # Get features... we need to run backbone + head (student)
+                # But SimCLR usually uses a projector MLP.
+                # Our 'student.head' is a DINO head (Linear-GELU-Linear). This is fine for SimCLR.
+                student_feats = student.backbone(batch)
+                student_out = student.head(student_feats[:, 0])
+                
+                # SimCLR takes z1 and z2 from student
+                # student_out is (2B, D) -> split into (B, D), (B, D)
+                B_sim = student_out.shape[0] // 2
+                z1, z2 = student_out[:B_sim], student_out[B_sim:]
+                loss = simclr_loss_fn(z1, z2)
+                loss_simclr = loss
+            else:
+                # DINO default
+                # Get features for both DINO and Gram losses
+                student_feats = student.backbone(batch)
+                with torch.no_grad():
+                    teacher_feats = teacher.backbone(batch)
+
+                # DINO loss: use CLS token through projection head
+                student_out = student.head(student_feats[:, 0])
+                teacher_out = teacher.head(teacher_feats[:, 0])
             
+                loss = dino_loss_fn(
+                    student_out,
+                    teacher_out,
+                    args.student_temp,
+                    args.teacher_temp,
+                )
+                loss_dino = loss
+                
+                # Gram anchoring (optional but enabled)
+                if training_cfg.gram_enabled:
+                    # Reuse features from above - no double forward
+                    loss_gram = compute_gram_anchoring_loss(student_feats, teacher_feats)
+                    loss = loss + training_cfg.gram_weight * loss_gram
+                
+                # KoLeo Regularization
+                if training_cfg.koleo_weight > 0.0:
+                    loss_koleo = koleo_loss_fn(student_out)
+                    loss = loss + training_cfg.koleo_weight * loss_koleo
+
             # Gradient accumulation
             loss = loss / args.accumulation_steps
         
@@ -1271,14 +1617,31 @@ def main() -> None:
         
         # Optimizer step (every accumulation_steps)
         if (step + 1) % args.accumulation_steps == 0:
+            # Unscale to check gradients
+            scaler.unscale_(opt)
+            
+            # Compute Grad Norm
+            total_norm = 0.0
+            for p in student.parameters():
+                if p.grad is not None:
+                    param_norm = p.grad.detach().data.norm(2)
+                    total_norm += param_norm.item() ** 2
+            total_norm = total_norm ** 0.5
+            
+            # Clip grads (optional but good for stability)
+            # torch.nn.utils.clip_grad_norm_(student.parameters(), 1.0)
+            
             scaler.step(opt)
             scaler.update()
             opt.zero_grad(set_to_none=True)
             
             # EMA update teacher
-            with torch.no_grad():
-                for p_s, p_t in zip(student.parameters(), teacher.parameters()):
-                    p_t.data.mul_(args.ema).add_(p_s.data, alpha=1.0 - args.ema)
+            if args.loss_type == "dino":
+                with torch.no_grad():
+                    for p_s, p_t in zip(student.parameters(), teacher.parameters()):
+                        p_t.data.mul_(args.ema).add_(p_s.data, alpha=1.0 - args.ema)
+        else:
+            total_norm = 0.0 # Placeholder
         
         # Logging
         loss_val = loss.item() * args.accumulation_steps
@@ -1298,16 +1661,22 @@ def main() -> None:
             
             # TensorBoard Scalars
             tb_writer.add_scalar("Train/Loss_Total", loss_val, step)
-            tb_writer.add_scalar("Train/Loss_DINO", loss_val - training_cfg.gram_weight * loss_gram.item(), step)
-            tb_writer.add_scalar("Train/Loss_Gram", loss_gram.item(), step)
+            tb_writer.add_scalar("Train/Loss_DINO", float(loss_dino.item()), step)
+            tb_writer.add_scalar("Train/Loss_SimCLR", float(loss_simclr.item()), step)
+            tb_writer.add_scalar("Train/Loss_MAE", float(loss_mae.item()), step)
+            tb_writer.add_scalar("Train/Loss_Gram", float(loss_gram.item()), step)
+            tb_writer.add_scalar("Train/Loss_KoLeo", float(loss_koleo.item()), step)
+            if total_norm > 0:
+                tb_writer.add_scalar("Train/Grad_Norm", float(total_norm), step)
 
-            with torch.no_grad():
-                t_prob = F.softmax((teacher_out - dino_loss_fn.center) / args.teacher_temp, dim=-1)
-                s_prob = F.softmax(student_out.detach() / args.student_temp, dim=-1)
-                t_ent = (-t_prob * torch.log(t_prob.clamp_min(1e-12))).sum(dim=-1).mean().item()
-                s_ent = (-s_prob * torch.log(s_prob.clamp_min(1e-12))).sum(dim=-1).mean().item()
-            tb_writer.add_scalar("Train/Entropy_Teacher", t_ent, step)
-            tb_writer.add_scalar("Train/Entropy_Student", s_ent, step)
+            if args.loss_type == "dino":
+                with torch.no_grad():
+                    t_prob = F.softmax((teacher_out - dino_loss_fn.center) / args.teacher_temp, dim=-1)
+                    s_prob = F.softmax(student_out.detach() / args.student_temp, dim=-1)
+                    t_ent = (-t_prob * torch.log(t_prob.clamp_min(1e-12))).sum(dim=-1).mean().item()
+                    s_ent = (-s_prob * torch.log(s_prob.clamp_min(1e-12))).sum(dim=-1).mean().item()
+                tb_writer.add_scalar("Train/Entropy_Teacher", t_ent, step)
+                tb_writer.add_scalar("Train/Entropy_Student", s_ent, step)
 
             tb_writer.add_scalar("Train/LR", current_lr, step)
             tb_writer.add_scalar("Perf/Samples_Per_Sec", samples_per_sec, step)
@@ -1330,7 +1699,16 @@ def main() -> None:
         # Checkpointing
         if (step + 1) % args.ckpt_every == 0:
             ckpt_path = run_dir / f"checkpoint_{step+1:08d}.pth"
-            save_checkpoint(ckpt_path, step + 1, student, teacher, opt, scaler, dino_loss_fn, training_cfg)
+            
+            # Save correct model based on mode
+            if args.loss_type == "mae":
+                _student = mae_model
+                _teacher = mae_model # Dummy
+            else:
+                _student = student
+                _teacher = teacher
+
+            save_checkpoint(ckpt_path, step + 1, _student, _teacher, opt, scaler, dino_loss_fn, training_cfg)
             print(f"checkpoint_saved={ckpt_path}")
             
             # Rotate old checkpoints
@@ -1338,77 +1716,93 @@ def main() -> None:
         
         # Monitoring
         if args.monitor_every and (step + 1) % args.monitor_every == 0:
-            heatmap = make_attention_heatmap(student, batch)
-            tb_writer.add_image("Monitor/Attention", heatmap, step, dataformats="HW")
+            if args.loss_type == "mae":
+                # For MAE, visualize reconstruction
+                # pred: (B, L, 3*p*p), mask: (B, L)
+                # We need to unpatchify to see the image
+                # This is complex to do perfectly in 10 lines, so let's skip for now
+                # or just log input slice
+                input_slice = batch[0, 1, :, :].detach().cpu().numpy()
+                tb_writer.add_image("Monitor/Input", input_slice, step, dataformats="HW")
+            else:
+                heatmap = make_attention_heatmap(student, batch)
+                tb_writer.add_image("Monitor/Attention", heatmap, step, dataformats="HW")
             
-            # Log input slice (first channel of first image in batch)
-            input_slice = batch[0, 1, :, :].detach().cpu().numpy() # Middle slice
-            tb_writer.add_image("Monitor/Input", input_slice, step, dataformats="HW")
+                # Log input slice (first channel of first image in batch)
+                input_slice = batch[0, 1, :, :].detach().cpu().numpy() # Middle slice
+                tb_writer.add_image("Monitor/Input", input_slice, step, dataformats="HW")
 
-            # Create Combined Image (Side-by-Side)
-            try:
-                # Convert input slice (float 0-1) to uint8 0-255
-                img_h, img_w = input_slice.shape
-                input_uint8 = (np.clip(input_slice, 0, 1) * 255).astype(np.uint8)
-                input_pil = Image.fromarray(input_uint8, mode='L').convert('RGB')
+                # Create Combined Image (Side-by-Side)
+                try:
+                    # Convert input slice (float 0-1) to uint8 0-255
+                    img_h, img_w = input_slice.shape
+                    input_uint8 = (np.clip(input_slice, 0, 1) * 255).astype(np.uint8)
+                    input_pil = Image.fromarray(input_uint8, mode='L').convert('RGB')
 
-                # Resize heatmap (float 0-1) to match input size and apply colormap simulation (red)
-                # We'll just keep it grayscale for simplicity or simple red overlay if we wanted, 
-                # but for side-by-side grayscale is clearest.
-                heatmap_uint8 = (np.clip(heatmap, 0, 1) * 255).astype(np.uint8)
-                heatmap_pil = Image.fromarray(heatmap_uint8, mode='L').resize((img_w, img_h), resample=Image.Resampling.NEAREST).convert('RGB')
+                    # Resize heatmap (float 0-1) to match input size and apply colormap simulation (red)
+                    # We'll just keep it grayscale for simplicity or simple red overlay if we wanted, 
+                    # but for side-by-side grayscale is clearest.
+                    heatmap_uint8 = (np.clip(heatmap, 0, 1) * 255).astype(np.uint8)
+                    heatmap_pil = Image.fromarray(heatmap_uint8, mode='L').resize((img_w, img_h), resample=Image.Resampling.NEAREST).convert('RGB')
 
-                # Stitch
-                combined = Image.new('RGB', (img_w * 2, img_h))
-                combined.paste(input_pil, (0, 0))
-                combined.paste(heatmap_pil, (img_w, 0))
+                    # Stitch
+                    combined = Image.new('RGB', (img_w * 2, img_h))
+                    combined.paste(input_pil, (0, 0))
+                    combined.paste(heatmap_pil, (img_w, 0))
 
-                # Convert back to CHW for TensorBoard (or HWC if using dataformats='HWC')
-                # tb_writer.add_image expects CHW by default or HW.
-                # Let's use HWC string for HWC array.
-                combined_np = np.array(combined)
-                tb_writer.add_image("Monitor/Combined", combined_np, step, dataformats="HWC")
+                    # Convert back to CHW for TensorBoard (or HWC if using dataformats='HWC')
+                    # tb_writer.add_image expects CHW by default or HW.
+                    # Let's use HWC string for HWC array.
+                    combined_np = np.array(combined)
+                    tb_writer.add_image("Monitor/Combined", combined_np, step, dataformats="HWC")
 
-            except Exception as e:
-                print(f"⚠️  Monitoring visualization error: {e}")
-            
-            # Log Gram Matrix
-            try:
-                # Debug stats
-                with torch.no_grad():
-                    # Re-compute gram for stats (or we could have returned it)
-                    model_s = student
-                    model_s.eval()
-                    
-                    # 1. Check Embedding Layer (Start)
-                    # We need to manually call patch_embed + pos_embed to check early diversity
-                    x_in = batch[0:1]
-                    x_emb = model_s.backbone.patch_embed(x_in)
-                    x_emb = x_emb.flatten(2).transpose(1, 2)
-                    # Add CLS + Pos (simplifying just to check patch diversity)
-                    # x_emb is (1, N, D). Let's check std across N.
-                    emb_std = x_emb.std(dim=1).mean().item()
-                    
-                    # 2. Check Backbone Output (End)
-                    feats = model_s.backbone(x_in)
-                    patches = feats[:, 1:, :]
-                    patches_norm = F.normalize(patches, p=2, dim=-1)
-                    gram = torch.bmm(patches_norm, patches_norm.transpose(1, 2)).squeeze(0)
-                    
-                    g_min, g_max, g_mean = gram.min().item(), gram.max().item(), gram.mean().item()
-                    
-                    # Input stats
-                    img = batch[0]
-                    i_min, i_max, i_mean = img.min().item(), img.max().item(), img.mean().item()
-                    
-                    print(f" [Monitor] Input: min={i_min:.4f} max={i_max:.4f} mean={i_mean:.4f}")
-                    print(f" [Monitor] Embed-L0 Diversity: std={emb_std:.6f} (If 0, PatchEmbed is broken)")
-                    print(f" [Monitor] Output Gram: mean={g_mean:.4f} (If 1, Attention collapsed)")
+                except Exception as e:
+                    print(f"⚠️  Monitoring visualization error: {e}")
+                
+                # Log Gram Matrix
+                try:
+                    # Debug stats
+                    with torch.no_grad():
+                        # Re-compute gram for stats (or we could have returned it)
+                        model_s = student
+                        model_s.eval()
+                        
+                        # 1. Check Embedding Layer (Start)
+                        # We need to manually call patch_embed + pos_embed to check early diversity
+                        x_in = batch[0:1]
+                        x_emb = model_s.backbone.patch_embed(x_in)
+                        x_emb = x_emb.flatten(2).transpose(1, 2)
+                        # Add CLS + Pos (simplifying just to check patch diversity)
+                        # x_emb is (1, N, D). Let's check std across N.
+                        emb_std = x_emb.std(dim=1).mean().item()
+                        
+                        # 2. Check Backbone Output (End)
+                        feats = model_s.backbone(x_in)
+                        
+                        # L2 norm of patch tokens (skip CLS and skip Registers if present)
+                        # feats: (1, N_total, D)
+                        # Patches are at [1 : 1+N_patches]
+                        num_patches = model_s.backbone.patch_embed.grid_size[0] * model_s.backbone.patch_embed.grid_size[1] if hasattr(model_s.backbone.patch_embed, 'grid_size') else int((model_s.backbone.img_size // model_s.backbone.patch)**2)
+                        
+                        patches = feats[:, 1 : 1 + num_patches, :] # (1, N_patches, D)
+                        
+                        patches_norm = F.normalize(patches, p=2, dim=-1)
+                        gram = torch.bmm(patches_norm, patches_norm.transpose(1, 2)).squeeze(0)
+                        
+                        g_min, g_max, g_mean = gram.min().item(), gram.max().item(), gram.mean().item()
+                        
+                        # Input stats
+                        img = batch[0]
+                        i_min, i_max, i_mean = img.min().item(), img.max().item(), img.mean().item()
+                        
+                        print(f" [Monitor] Input: min={i_min:.4f} max={i_max:.4f} mean={i_mean:.4f}")
+                        print(f" [Monitor] Embed-L0 Diversity: std={emb_std:.6f} (If 0, PatchEmbed is broken)")
+                        print(f" [Monitor] Output Gram: mean={g_mean:.4f} (If 1, Attention collapsed)")
 
-                gram_img = make_gram_heatmap(student, batch)
-                tb_writer.add_image("Monitor/Gram", gram_img, step, dataformats="HW")
-            except Exception as e:
-                print(f"⚠️  Gram visualization error: {e}")
+                    gram_img = make_gram_heatmap(student, batch)
+                    tb_writer.add_image("Monitor/Gram", gram_img, step, dataformats="HW")
+                except Exception as e:
+                    print(f"⚠️  Gram visualization error: {e}")
     
     # ─────────────────────────────────────────────────────────────────────────
     # 7. Final Checkpoint
@@ -1418,7 +1812,16 @@ def main() -> None:
     
     final_step = step + 1
     final_path = run_dir / f"checkpoint_final_{final_step:08d}.pth"
-    save_checkpoint(final_path, final_step, student, teacher, opt, scaler, dino_loss_fn, training_cfg)
+    
+    # Save correct model based on mode
+    if args.loss_type == "mae":
+        _student = mae_model
+        _teacher = mae_model
+    else:
+        _student = student
+        _teacher = teacher
+
+    save_checkpoint(final_path, final_step, _student, _teacher, opt, scaler, dino_loss_fn, training_cfg)
     print(f"final_checkpoint={final_path}")
     
     elapsed = time.time() - t0
