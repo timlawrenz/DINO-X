@@ -44,16 +44,18 @@ for PART in part_aa part_ab part_ac part_ad part_ae; do
         continue
     fi
     echo "download=$FILE"
-    huggingface-cli download "$HF_REPO" "$FILE" \
+    hf download "$HF_REPO" "$FILE" \
         --repo-type dataset \
-        --local-dir "$CACHE_DIR"
+        --local-dir "$CACHE_DIR" \
+        --token "${HF_TOKEN:-}"
 done
 
 # Also download index + split manifest (small files, useful standalone)
 for META in index.csv split_manifest.json; do
-    huggingface-cli download "$HF_REPO" "$META" \
+    hf download "$HF_REPO" "$META" \
         --repo-type dataset \
-        --local-dir "$CACHE_DIR" 2>/dev/null || true
+        --local-dir "$CACHE_DIR" \
+        --token "${HF_TOKEN:-}" 2>/dev/null || true
 done
 
 # Reassemble split tar and extract
@@ -65,6 +67,12 @@ tar -xzf "$CACHE_DIR/$TAR_BASE" -C "$REPO_ROOT"
 
 # Mark extraction complete
 touch "$COMPLETE_MARKER"
+
+# Copy metadata into combined-mvp for easy access
+mkdir -p data/processed/combined-mvp
+for META in index.csv split_manifest.json; do
+    [ -f "$CACHE_DIR/$META" ] && cp "$CACHE_DIR/$META" "data/processed/combined-mvp/$META"
+done
 
 # Clean up cache
 rm -f "$CACHE_DIR/${TAR_BASE}"*
