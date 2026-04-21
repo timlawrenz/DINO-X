@@ -35,11 +35,17 @@ import os
 import random
 import signal
 import subprocess
+import sys
 import time
 import warnings
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+# Ensure repo root is on sys.path so `zoo` package is importable
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 # Optional import helpers
 def _need(mod: str) -> None:

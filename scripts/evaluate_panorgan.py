@@ -77,10 +77,13 @@ from zoo.arch import (  # noqa: E402
     needs_migration,
 )
 
-# Data utilities still live in phase5_big_run.py — add scripts/ to path
+# Data utilities still live in phase5_big_run.py — add scripts/ and repo root to path
 _scripts_dir = str(Path(__file__).resolve().parent)
+_repo_root = str(Path(__file__).resolve().parent.parent)
 if _scripts_dir not in sys.path:
     sys.path.insert(0, _scripts_dir)
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
 from phase5_big_run import ModelConfig, PngDataset, _load_index_rows  # noqa: E402
 
 
