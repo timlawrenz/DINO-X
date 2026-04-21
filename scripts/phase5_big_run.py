@@ -252,6 +252,9 @@ class TrainingConfig:
     gram_weight: float = 1.0
     koleo_weight: float = 0.0
     
+    # Scale awareness
+    scale_aware: bool = False
+    
     # Checkpointing
     ckpt_every: int = 100
     ckpt_keep_last: int = 5
@@ -387,6 +390,7 @@ class PatchViT(nn.Module):
         mlp_ratio: float = 4.0,
         use_grad_checkpoint: bool = False,
         num_registers: int = 4,
+        scale_aware: bool = False,
     ) -> None:
         super().__init__()
         assert img_size % patch == 0
@@ -395,6 +399,7 @@ class PatchViT(nn.Module):
         self.dim = dim
         self.use_grad_checkpoint = use_grad_checkpoint
         self.num_registers = num_registers
+        self.scale_aware = scale_aware
 
         self.patch_embed = nn.Conv2d(3, dim, kernel_size=patch, stride=patch, bias=True)
         n_patches = (img_size // patch) * (img_size // patch)
@@ -405,12 +410,21 @@ class PatchViT(nn.Module):
         if num_registers > 0:
             self.registers = nn.Parameter(torch.zeros(1, num_registers, dim))
 
+        if scale_aware:
+            self.scale_embed = ScaleEmbedding(dim)
+
         self.blocks = nn.ModuleList([
             TransformerBlock(dim, heads, mlp_ratio) for _ in range(depth)
         ])
         self.norm = nn.LayerNorm(dim)
         
         self.apply(self._init_weights)
+
+        # Re-apply zero-init for ScaleEmbedding output projection AFTER
+        # self.apply() which would have overwritten it with xavier_uniform.
+        if scale_aware:
+            nn.init.zeros_(self.scale_embed.mlp[2].weight)
+            nn.init.zeros_(self.scale_embed.mlp[2].bias)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -429,7 +443,7 @@ class PatchViT(nn.Module):
         if self.num_registers > 0:
             nn.init.trunc_normal_(self.registers, std=0.02)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, spacing: torch.Tensor | None = None) -> torch.Tensor:
         B = x.size(0)
         x = self.patch_embed(x)
         x = x.flatten(2).transpose(1, 2)
@@ -437,12 +451,14 @@ class PatchViT(nn.Module):
         cls_tokens = self.cls_token.expand(B, -1, -1)
         x = torch.cat([cls_tokens, x], dim=1)
         x = x + self.pos_embed
+
+        # Scale embedding: add physical spacing information to all tokens
+        if self.scale_aware and spacing is not None:
+            x = x + self.scale_embed(spacing)  # (B, 1, dim) broadcasts over seq
         
         if self.num_registers > 0:
             regs = self.registers.expand(B, -1, -1)
-            # Concatenate registers AFTER pos embedding (they don't need pos info usually, or it's shared)
-            # Standard: [CLS, PATCHES, REGISTERS] or [CLS, REGISTERS, PATCHES]?
-            # DINOv2: [CLS, PATCHES, REGISTERS] is common so they don't mess up pos indices.
+            # Concatenate registers AFTER pos + scale embeddings
             x = torch.cat([x, regs], dim=1)
 
         for blk in self.blocks:
@@ -475,6 +491,44 @@ class TransformerBlock(nn.Module):
         return x
 
 
+class ScaleEmbedding(nn.Module):
+    """Projects physical spacing (pixel_spacing_x, pixel_spacing_y, slice_thickness) → embed_dim.
+
+    Enables scale-aware representation learning: the model natively knows that a
+    14×14 patch at 0.5 mm covers 7 mm of tissue, while the same patch at 1.5 mm
+    covers 21 mm. Spacing is treated as a continuous signal (not categorical) so
+    the model can generalize to unseen resolutions.
+
+    The output Linear is **zero-initialized** so that:
+    - A freshly created ScaleEmbedding produces all-zero vectors.
+    - Checkpoints trained *without* scale awareness resume identically when the
+      module is added (gradual learning, no sudden perturbation).
+    """
+
+    def __init__(self, embed_dim: int) -> None:
+        super().__init__()
+        hidden = max(embed_dim // 4, 16)
+        self.mlp = nn.Sequential(
+            nn.Linear(3, hidden),
+            nn.GELU(),
+            nn.Linear(hidden, embed_dim),
+            nn.LayerNorm(embed_dim),
+        )
+        # Zero-init the output projection so the embedding starts as a no-op.
+        nn.init.zeros_(self.mlp[2].weight)
+        nn.init.zeros_(self.mlp[2].bias)
+
+    def forward(self, spacing: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            spacing: (B, 3) — [pixel_spacing_x, pixel_spacing_y, slice_thickness] in mm.
+
+        Returns:
+            (B, 1, embed_dim) — broadcast-ready for addition to patch embeddings.
+        """
+        return self.mlp(spacing).unsqueeze(1)
+
+
 class DinoStudentTeacher(nn.Module):
     """DINO student/teacher wrapper with projection head."""
     def __init__(self, backbone: nn.Module, out_dim: int = 8192) -> None:
@@ -486,8 +540,8 @@ class DinoStudentTeacher(nn.Module):
             nn.Linear(backbone.dim, out_dim),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        feats = self.backbone(x)
+    def forward(self, x: torch.Tensor, spacing: torch.Tensor | None = None) -> torch.Tensor:
+        feats = self.backbone(x, spacing=spacing)
         cls_token = feats[:, 0]
         return self.head(cls_token)
 
@@ -502,22 +556,43 @@ class IndexRow:
     series_dir: str
     slice_index: int
     encoding: str
+    spacing_x: float = 1.0
+    spacing_y: float = 1.0
+    spacing_z: float = 1.0
 
 
-def _load_index_rows(index_csv: Path) -> list[IndexRow]:
-    """Load index CSV."""
+def _load_index_rows(index_csv: Path, require_spacing: bool = False) -> list[IndexRow]:
+    """Load index CSV.
+
+    Args:
+        index_csv: Path to CSV with columns: png_path, series_dir, slice_index, encoding,
+                   and optionally spacing_x, spacing_y, spacing_z.
+        require_spacing: If True, warn when spacing columns are missing.
+    """
     rows = []
     with open(index_csv, newline="") as f:
         reader = csv.DictReader(f)
-        for r in reader:
-            rows.append(
-                IndexRow(
-                    png_path=Path(r["png_path"]),
-                    series_dir=r["series_dir"],
-                    slice_index=int(r["slice_index"]),
-                    encoding=r["encoding"],
-                )
+        fieldnames = reader.fieldnames or []
+        has_spacing = all(c in fieldnames for c in ("spacing_x", "spacing_y", "spacing_z"))
+
+        if require_spacing and not has_spacing:
+            warnings.warn(
+                f"--scale-aware is enabled but {index_csv} lacks spacing_x/spacing_y/spacing_z columns. "
+                "Defaulting to (1.0, 1.0, 1.0) — the model won't learn real scale awareness."
             )
+
+        for r in reader:
+            kwargs: dict[str, Any] = {
+                "png_path": Path(r["png_path"]),
+                "series_dir": r["series_dir"],
+                "slice_index": int(r["slice_index"]),
+                "encoding": r["encoding"],
+            }
+            if has_spacing:
+                kwargs["spacing_x"] = float(r["spacing_x"])
+                kwargs["spacing_y"] = float(r["spacing_y"])
+                kwargs["spacing_z"] = float(r["spacing_z"])
+            rows.append(IndexRow(**kwargs))
     return rows
 
 
@@ -531,6 +606,7 @@ class PngDataset(torch.utils.data.Dataset):
         rw_level_max: float = 400.0,
         rw_width_min: float = 800.0,
         rw_width_max: float = 2000.0,
+        scale_aware: bool = False,
     ):
         self.rows = rows
         self.img_size = img_size
@@ -538,6 +614,7 @@ class PngDataset(torch.utils.data.Dataset):
         self.rw_level_max = rw_level_max
         self.rw_width_min = rw_width_min
         self.rw_width_max = rw_width_max
+        self.scale_aware = scale_aware
 
         self.transform = transforms.Compose([
             transforms.RandomResizedCrop(img_size, scale=(0.5, 1.0), interpolation=transforms.InterpolationMode.BICUBIC),
@@ -573,7 +650,7 @@ class PngDataset(torch.utils.data.Dataset):
             
         return windowed
 
-    def __getitem__(self, idx: int) -> list[torch.Tensor]:
+    def __getitem__(self, idx: int) -> tuple[list[torch.Tensor], torch.Tensor]:
         # Robust data loading loop
         attempts = 0
         while attempts < 10:
@@ -601,8 +678,13 @@ class PngDataset(torch.utils.data.Dataset):
                     x = np.stack(slices, axis=0) # (3, H, W)
                     return self.transform(torch.from_numpy(x).contiguous())
 
+                spacing = torch.tensor(
+                    [row.spacing_x, row.spacing_y, row.spacing_z],
+                    dtype=torch.float32,
+                )
+
                 # Return two different windowed views for DINO cross-view prediction
-                return [_get_view(), _get_view()]
+                return [_get_view(), _get_view()], spacing
             
             except Exception as e:
                 print(f"⚠️  Data loading error at index {idx} ({self.rows[idx].png_path}): {e}")
@@ -612,6 +694,26 @@ class PngDataset(torch.utils.data.Dataset):
         
         # Fallback if 10 attempts fail (unlikely)
         raise RuntimeError("Failed to load data after 10 attempts")
+
+
+def dino_collate(
+    batch: list[tuple[list[torch.Tensor], torch.Tensor]],
+) -> tuple[list[torch.Tensor], torch.Tensor]:
+    """Custom collate for PngDataset that returns (views, spacing).
+
+    Args:
+        batch: List of (views_list, spacing_tensor) from PngDataset.__getitem__
+
+    Returns:
+        ([view1_batch, view2_batch], spacing_batch) where:
+        - view1_batch, view2_batch: (B, 3, H, W)
+        - spacing_batch: (B, 3)
+    """
+    views_lists, spacings = zip(*batch)
+    v1 = torch.stack([v[0] for v in views_lists])
+    v2 = torch.stack([v[1] for v in views_lists])
+    spacing_batch = torch.stack(list(spacings))
+    return [v1, v2], spacing_batch
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1091,16 +1193,32 @@ def load_checkpoint(
     scaler: torch.amp.GradScaler,
     dino_loss: DINOLoss,
     device: torch.device,
+    scale_aware: bool = False,
 ) -> tuple[int, TrainingConfig]:
-    """Load training checkpoint."""
+    """Load training checkpoint.
+
+    When loading a non-scale-aware checkpoint into a scale-aware model (or vice
+    versa), uses ``strict=False`` so that missing/unexpected ``scale_embed.*``
+    keys are silently skipped rather than raising an error.
+    """
     if not path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {path}")
     
     # PyTorch 2.6+ defaults weights_only=True; we store config/RNG (trusted)
     payload = torch.load(path, map_location=device, weights_only=False)
     
-    student.load_state_dict(payload["student"], strict=True)
-    teacher.load_state_dict(payload["teacher"], strict=True)
+    # Detect scale_aware mismatch between checkpoint and current model
+    ckpt_config = payload.get("config", {})
+    ckpt_scale_aware = ckpt_config.get("scale_aware", False)
+    strict = (ckpt_scale_aware == scale_aware)
+    if not strict:
+        warnings.warn(
+            f"Scale-aware mismatch: checkpoint={ckpt_scale_aware}, current={scale_aware}. "
+            "Loading with strict=False (scale_embed weights will be freshly initialized)."
+        )
+    
+    student.load_state_dict(payload["student"], strict=strict)
+    teacher.load_state_dict(payload["teacher"], strict=strict)
     opt.load_state_dict(payload["opt"])
     
     if payload.get("scaler") is not None:
@@ -1220,6 +1338,11 @@ def main() -> None:
     # Loss Type
     ap.add_argument("--loss-type", choices=["dino", "simclr", "mae"], default="dino", help="Objective function")
 
+    # Scale Awareness
+    ap.add_argument("--scale-aware", action="store_true",
+                    help="Enable scale embedding: injects (pixel_spacing_x, pixel_spacing_y, slice_thickness) "
+                         "into the ViT. Requires spacing_x/spacing_y/spacing_z columns in index CSV.")
+
     # Checkpointing
     ap.add_argument("--ckpt-every", type=int, default=100)
     ap.add_argument("--ckpt-keep-last", type=int, default=5)
@@ -1324,6 +1447,7 @@ def main() -> None:
         gram_enabled=True,  # Always enabled - required for medical imaging
         gram_weight=args.gram_weight,
         koleo_weight=args.koleo_weight,
+        scale_aware=args.scale_aware,
         ckpt_every=args.ckpt_every,
         ckpt_keep_last=args.ckpt_keep_last,
         monitor_every=args.monitor_every,
@@ -1387,8 +1511,8 @@ def main() -> None:
     # 3. Data Loading
     # ─────────────────────────────────────────────────────────────────────────
     
-    all_rows = _load_index_rows(args.index_csv)
-    print(f"loaded_rows={len(all_rows)}")
+    all_rows = _load_index_rows(args.index_csv, require_spacing=args.scale_aware)
+    print(f"loaded_rows={len(all_rows)} scale_aware={args.scale_aware}")
     
     # Exclude validation set if split manifest provided
     if args.split_manifest and args.split_manifest.exists():
@@ -1412,6 +1536,7 @@ def main() -> None:
         rw_level_max=training_cfg.rw_level_max,
         rw_width_min=training_cfg.rw_width_min,
         rw_width_max=training_cfg.rw_width_max,
+        scale_aware=args.scale_aware,
     )
     
     if len(ds) < args.batch_size:
@@ -1429,6 +1554,7 @@ def main() -> None:
         drop_last=True,
         generator=gen,
         worker_init_fn=_worker_init_fn,
+        collate_fn=dino_collate,
     )
     it = iter(dl)
     
@@ -1444,6 +1570,7 @@ def main() -> None:
         heads=model_cfg.heads,
         mlp_ratio=model_cfg.mlp_ratio,
         use_grad_checkpoint=args.grad_checkpoint,
+        scale_aware=args.scale_aware,
     )
     student = DinoStudentTeacher(vit_s, out_dim=model_cfg.out_dim).to(device)
     
@@ -1455,6 +1582,7 @@ def main() -> None:
         heads=model_cfg.heads,
         mlp_ratio=model_cfg.mlp_ratio,
         use_grad_checkpoint=args.grad_checkpoint,
+        scale_aware=args.scale_aware,
     )
     teacher = DinoStudentTeacher(vit_t, out_dim=model_cfg.out_dim).to(device)
     teacher.load_state_dict(student.state_dict())
@@ -1487,7 +1615,7 @@ def main() -> None:
     
     if resume_from:
         print(f"resume=true checkpoint={resume_from}")
-        start_step, loaded_cfg = load_checkpoint(resume_from, student, teacher, opt, scaler, dino_loss_fn, device)
+        start_step, loaded_cfg = load_checkpoint(resume_from, student, teacher, opt, scaler, dino_loss_fn, device, scale_aware=args.scale_aware)
         print(f"resumed_from_step={start_step}")
         
         # Check for hardware change
@@ -1539,16 +1667,18 @@ def main() -> None:
         for param_group in opt.param_groups:
             param_group["lr"] = current_lr
         
-        # Data loading: list[tensor, tensor]
+        # Data loading: ([view1, view2], spacing)
         try:
-            views = next(it)
+            views, spacing = next(it)
         except StopIteration:
             it = iter(dl)
-            views = next(it)
+            views, spacing = next(it)
         
         # views is a list of [batch_v1, batch_v2]
         # Concatenate for efficient forward pass: (2*B, 3, H, W)
         batch = torch.cat(views, dim=0).to(device, non_blocking=True)
+        # Duplicate spacing for both views (both come from the same slice)
+        spacing_2b = torch.cat([spacing, spacing], dim=0).to(device, non_blocking=True) if args.scale_aware else None
         
         # Forward pass
         with torch.amp.autocast("cuda", enabled=scaler.is_enabled()):
@@ -1563,10 +1693,7 @@ def main() -> None:
                 loss = mae_model.forward_loss(batch, pred, mask)
                 loss_mae = loss
             elif training_cfg.loss_type == "simclr":
-                # Get features... we need to run backbone + head (student)
-                # But SimCLR usually uses a projector MLP.
-                # Our 'student.head' is a DINO head (Linear-GELU-Linear). This is fine for SimCLR.
-                student_feats = student.backbone(batch)
+                student_feats = student.backbone(batch, spacing=spacing_2b)
                 student_out = student.head(student_feats[:, 0])
                 
                 # SimCLR takes z1 and z2 from student
@@ -1578,9 +1705,9 @@ def main() -> None:
             else:
                 # DINO default
                 # Get features for both DINO and Gram losses
-                student_feats = student.backbone(batch)
+                student_feats = student.backbone(batch, spacing=spacing_2b)
                 with torch.no_grad():
-                    teacher_feats = teacher.backbone(batch)
+                    teacher_feats = teacher.backbone(batch, spacing=spacing_2b)
 
                 # DINO loss: use CLS token through projection head
                 student_out = student.head(student_feats[:, 0])
@@ -1777,7 +1904,9 @@ def main() -> None:
                         emb_std = x_emb.std(dim=1).mean().item()
                         
                         # 2. Check Backbone Output (End)
-                        feats = model_s.backbone(x_in)
+                        # Pass spacing if scale_aware (use first sample's spacing)
+                        x_spacing = spacing_2b[0:1] if spacing_2b is not None else None
+                        feats = model_s.backbone(x_in, spacing=x_spacing)
                         
                         # L2 norm of patch tokens (skip CLS and skip Registers if present)
                         # feats: (1, N_total, D)
