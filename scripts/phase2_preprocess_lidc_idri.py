@@ -63,7 +63,36 @@ def save_slice_16bit(hu_slice: "np.ndarray", out_path: Path) -> None:
     Image.fromarray(u16, mode="I;16").save(out_path, format="PNG")
 
 
-def _load_dicom_series(series_dir: Path) -> "np.ndarray":
+@dataclass(frozen=True)
+class SeriesSpacing:
+    """Physical spacing extracted from DICOM headers."""
+
+    spacing_x: float = 1.0
+    spacing_y: float = 1.0
+    spacing_z: float = 1.0
+
+
+def _extract_spacing_from_dicom(ds) -> SeriesSpacing:
+    """Extract PixelSpacing and SliceThickness from a pydicom Dataset."""
+    ps = getattr(ds, "PixelSpacing", None)
+    st = getattr(ds, "SliceThickness", None)
+    sbs = getattr(ds, "SpacingBetweenSlices", None)
+    return SeriesSpacing(
+        spacing_x=float(ps[0]) if ps is not None and len(ps) >= 2 else 1.0,
+        spacing_y=float(ps[1]) if ps is not None and len(ps) >= 2 else 1.0,
+        spacing_z=float(sbs) if sbs is not None else (float(st) if st is not None else 1.0),
+    )
+
+
+def _load_dicom_series(series_dir: Path) -> tuple["np.ndarray", SeriesSpacing]:
+    """Load a DICOM series as a 3D numpy volume and extract spacing.
+
+    Computes z-spacing from ImagePositionPatient deltas when available
+    (more reliable than SliceThickness). Falls back to
+    SpacingBetweenSlices, then SliceThickness.
+
+    Returns (volume, spacing) where volume is shape (N, H, W) in HU.
+    """
     try:
         import pydicom  # type: ignore
         from pydicom.dataset import FileMetaDataset  # type: ignore
@@ -80,6 +109,8 @@ def _load_dicom_series(series_dir: Path) -> "np.ndarray":
                 files.append(fp)
 
     keys: list[SliceKey] = []
+    header_spacing: SeriesSpacing | None = None
+
     for fp in files:
         try:
             # Note: stop_before_pixels=True means PixelData won't be present even for image slices.
@@ -96,10 +127,30 @@ def _load_dicom_series(series_dir: Path) -> "np.ndarray":
         sort_z = float(ipp[2]) if ipp is not None and len(ipp) >= 3 else float(instance)
         keys.append(SliceKey(sort_z=sort_z, instance=instance, path=fp))
 
+        # Extract spacing from first valid DICOM header
+        if header_spacing is None:
+            header_spacing = _extract_spacing_from_dicom(ds)
+
     if not keys:
         raise RuntimeError(f"No readable DICOM image slices found under: {series_dir}")
 
     keys.sort(key=lambda k: (k.sort_z, k.instance, str(k.path)))
+
+    # Compute z-spacing from IPP deltas (more reliable than SliceThickness)
+    z_positions = sorted({k.sort_z for k in keys})
+    if len(z_positions) >= 2:
+        deltas = sorted(
+            abs(z_positions[i + 1] - z_positions[i])
+            for i in range(len(z_positions) - 1)
+        )
+        ipp_z = deltas[len(deltas) // 2]  # median
+        if ipp_z > 0:
+            sp = header_spacing or SeriesSpacing()
+            header_spacing = SeriesSpacing(
+                spacing_x=sp.spacing_x, spacing_y=sp.spacing_y, spacing_z=ipp_z,
+            )
+
+    spacing = header_spacing or SeriesSpacing()
 
     slices: list["np.ndarray"] = []
     base_shape: tuple[int, int] | None = None
@@ -140,7 +191,7 @@ def _load_dicom_series(series_dir: Path) -> "np.ndarray":
         )
 
     vol = np.stack(slices, axis=0)
-    return vol
+    return vol, spacing
 
 
 def _synthetic_volume(n: int = 16, h: int = 128, w: int = 128) -> "np.ndarray":
@@ -164,10 +215,33 @@ def iter_series_dirs(dicom_root: Path) -> Iterable[Path]:
             dirnames[:] = []
 
 
+def _quick_extract_spacing(series_dir: Path) -> SeriesSpacing:
+    """Read one DICOM header from a series dir for spacing (no pixel data)."""
+    try:
+        import pydicom  # type: ignore
+    except ImportError:
+        return SeriesSpacing()
+
+    for root, _, fnames in os.walk(series_dir):
+        for fname in sorted(fnames):
+            fp = Path(root) / fname
+            if not fp.is_file() or fp.name in ("LICENSE", ".complete"):
+                continue
+            try:
+                ds = pydicom.dcmread(str(fp), stop_before_pixels=True, force=True)
+            except Exception:
+                continue
+            if hasattr(ds, "Rows"):
+                return _extract_spacing_from_dicom(ds)
+    return SeriesSpacing()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dicom-root", type=Path, default=Path("data/raw"))
     ap.add_argument("--out-root", type=Path, default=Path("data/processed"))
+    ap.add_argument("--dataset-name", type=str, default="lidc-idri",
+                    help="Name for the output subdirectory (e.g., lidc-idri, pancreas-ct)")
     ap.add_argument("--max-series", type=int, default=0, help="0 = no limit")
     ap.add_argument(
         "--force-reprocess",
@@ -178,17 +252,21 @@ def main() -> int:
     args = ap.parse_args()
 
     out_root = args.out_root
+    dataset_name = args.dataset_name
     index_path = out_root / "_index" / "index.csv"
     index_path.parent.mkdir(parents=True, exist_ok=True)
 
     with index_path.open("w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["png_path", "series_dir", "slice_index", "encoding"])  # minimal
+        w.writerow(["png_path", "series_dir", "slice_index", "encoding",
+                     "spacing_x", "spacing_y", "spacing_z"])
 
         if args.dry_run:
             vol = _synthetic_volume()
             series_name = "synthetic"
-            _write_volume(vol, series_name, out_root, w)
+            spacing = SeriesSpacing(spacing_x=0.75, spacing_y=0.75, spacing_z=1.5)
+            _write_volume(vol, series_name, out_root, w,
+                          dataset_name=dataset_name, spacing=spacing)
             print("ok=true")
             print(f"index={index_path}")
             return 0
@@ -203,12 +281,16 @@ def main() -> int:
                 continue
 
             series_name = series_dir.as_posix().replace("/", "_")
-            out_series_dir = out_root / "lidc-idri" / series_name
+            out_series_dir = out_root / dataset_name / series_name
 
             # Default incremental behavior: if the output folder already exists, skip
             # PNG generation and only re-index what's already on disk.
+            # Still extract spacing from DICOM headers for the index CSV.
             if not args.force_reprocess and out_series_dir.exists():
-                n = _write_existing_series(out_series_dir, w, series_dir=series_dir)
+                skip_spacing = _quick_extract_spacing(series_dir)
+                n = _write_existing_series(
+                    out_series_dir, w, series_dir=series_dir, spacing=skip_spacing,
+                )
                 if n >= 3:
                     print(f"skip=true series_dir={series_dir} reason=already_converted slices={n}")
                     n_processed += 1
@@ -217,7 +299,7 @@ def main() -> int:
                     continue
 
             try:
-                vol = _load_dicom_series(series_dir)
+                vol, spacing = _load_dicom_series(series_dir)
             except RuntimeError as e:
                 print(f"skip=true series_dir={series_dir} reason=load_failed err={e}")
                 continue
@@ -228,7 +310,8 @@ def main() -> int:
                 )
                 continue
 
-            _write_volume(vol, series_name, out_root, w, series_dir=series_dir)
+            _write_volume(vol, series_name, out_root, w,
+                          series_dir=series_dir, dataset_name=dataset_name, spacing=spacing)
             n_processed += 1
             if args.max_series and n_processed >= args.max_series:
                 break
@@ -243,8 +326,10 @@ def _write_existing_series(
     writer: "csv.writer",
     *,
     series_dir: Optional[Path] = None,
+    spacing: SeriesSpacing | None = None,
 ) -> int:
     # Re-index existing PNG slices from disk.
+    sp = spacing or SeriesSpacing()
     paths = sorted(out_series_dir.glob("slice_*.png"))
     n = 0
     for p in paths:
@@ -259,6 +344,9 @@ def _write_existing_series(
                 str(series_dir) if series_dir is not None else out_series_dir.name,
                 idx,
                 f"hu16_i16_offset{HU_OFFSET}_clip{int(HU_CLIP_LO)}_{int(HU_CLIP_HI)}",
+                f"{sp.spacing_x:.6f}",
+                f"{sp.spacing_y:.6f}",
+                f"{sp.spacing_z:.6f}",
             ]
         )
         n += 1
@@ -271,10 +359,13 @@ def _write_volume(
     out_root: Path,
     writer: "csv.writer",
     series_dir: Optional[Path] = None,
+    dataset_name: str = "lidc-idri",
+    spacing: SeriesSpacing | None = None,
 ) -> None:
+    sp = spacing or SeriesSpacing()
     # Raw HU slices: one 16-bit grayscale PNG per axial slice.
     for i in range(vol.shape[0]):
-        out_path = out_root / "lidc-idri" / series_name / f"slice_{i:04d}.png"
+        out_path = out_root / dataset_name / series_name / f"slice_{i:04d}.png"
         save_slice_16bit(vol[i], out_path)
 
         writer.writerow([
@@ -282,6 +373,9 @@ def _write_volume(
             str(series_dir) if series_dir is not None else series_name,
             i,
             f"hu16_i16_offset{HU_OFFSET}_clip{int(HU_CLIP_LO)}_{int(HU_CLIP_HI)}",
+            f"{sp.spacing_x:.6f}",
+            f"{sp.spacing_y:.6f}",
+            f"{sp.spacing_z:.6f}",
         ])
 
 
