@@ -1,0 +1,31 @@
+{
+  "kind": "phase5_view_retrieval",
+  "version": 1,
+  "created_at": "2026-04-21T20:43:01.284084+00:00",
+  "checkpoint": "data/runs/20260421_200446_mvp_baseline/checkpoint_final_00005000.pth",
+  "step": 5000,
+  "index_csv": "data/processed/combined-mvp/index.csv",
+  "split_manifest": "data/processed/combined-mvp/split_manifest.json",
+  "img_size": 224,
+  "n": 2048,
+  "seed": 42,
+  "batch_size": 64,
+  "topk": 5,
+  "top1": 0.00244140625,
+  "topk_acc": 0.009765625,
+  "random_baseline": 0.00048828125,
+  "ratio_vs_random": 5.0,
+  "pass_ratio": 10.0,
+  "passed": false,
+  "seconds": 45.54075527191162,
+  "model": {
+    "name": "vit-small",
+    "patch": 14,
+    "dim": 384,
+    "depth": 12,
+    "heads": 6,
+    "mlp_ratio": 4.0,
+    "out_dim": 8192,
+    "ln_out_dim": 9.010913347279288
+  }
+}
