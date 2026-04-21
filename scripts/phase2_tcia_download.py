@@ -255,6 +255,7 @@ def main() -> int:
         out_root.mkdir(parents=True, exist_ok=True)
 
         resume_enabled = not getattr(args, "no_resume", False)
+        n_failed = 0
 
         for idx, uid in enumerate(uids, start=1):
             series_dir = out_root / uid
@@ -277,7 +278,22 @@ def main() -> int:
                     continue
 
             print(f"download_start idx={idx}/{len(uids)} uid={uid}")
-            download_series_zip(args.base_url, uid, zip_path, args.api_key, resume=resume_enabled)
+            dl_ok = False
+            for dl_attempt in range(5):
+                try:
+                    download_series_zip(args.base_url, uid, zip_path, args.api_key, resume=resume_enabled)
+                    dl_ok = True
+                    break
+                except (urllib.error.HTTPError, urllib.error.URLError, OSError) as e:
+                    if dl_attempt < 4:
+                        wait = 15 * (dl_attempt + 1)
+                        print(f"  retry={dl_attempt + 1} uid={uid} err={e} wait={wait}s")
+                        time.sleep(wait)
+                    else:
+                        print(f"  FAILED uid={uid} after 5 attempts: {e}")
+            if not dl_ok:
+                n_failed += 1
+                continue
 
             if not _zip_seems_ok(zip_path):
                 raise SystemExit(f"Bad ZIP for uid={uid} at {zip_path}")
@@ -308,6 +324,10 @@ def main() -> int:
             print(f"download_ok uid={uid} out={series_dir}")
             if getattr(args, "sleep", 0.0):
                 time.sleep(args.sleep)
+
+        if n_failed:
+            print(f"WARNING: {n_failed}/{len(uids)} series failed to download. "
+                  "Re-run to retry failed series.")
 
     if args.cmd == "download-series":
         uids = [ln.strip() for ln in args.uids.read_text().splitlines() if ln.strip()]

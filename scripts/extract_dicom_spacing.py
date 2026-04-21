@@ -225,10 +225,22 @@ def main() -> int:
         for row in reader:
             n_total += 1
             sd = row["series_dir"]
-            # Try matching by exact path, resolved path, then basename
+            # Try matching by exact path, resolved path, basename,
+            # then extract UID from mangled name (e.g. "data_raw_1.3.6..." → "1.3.6...")
             sp = (uid_to_spacing.get(sd)
                   or uid_to_spacing.get(str(Path(sd).resolve()))
                   or uid_to_spacing.get(Path(sd).name))
+
+            # Handle mangled series_dir from preprocessing (path / → _)
+            if sp is None:
+                # Strip common prefixes produced by the preprocessing script
+                name = Path(sd).name
+                for prefix in ("data_raw_", "data_"):
+                    if name.startswith(prefix):
+                        uid_candidate = name[len(prefix):]
+                        sp = uid_to_spacing.get(uid_candidate)
+                        if sp is not None:
+                            break
 
             if sp is not None:
                 n_matched += 1
