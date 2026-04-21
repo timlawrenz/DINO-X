@@ -90,6 +90,7 @@ def main() -> int:
     ap.add_argument(
         "--ratio", type=float, default=10.0, help="Pass gate: top1 >= ratio*(1/N)"
     )
+    ap.add_argument("--scale-aware", action="store_true", help="Enable scale embedding (must match checkpoint)")
     args = ap.parse_args()
 
     if not args.checkpoint.exists():
@@ -138,6 +139,7 @@ def main() -> int:
         heads=mc.heads,
         mlp_ratio=mc.mlp_ratio,
         use_grad_checkpoint=False,
+        scale_aware=args.scale_aware,
     )
     student = m.DinoStudentTeacher(vit, out_dim=mc.out_dim).to(device)
     student.load_state_dict(payload["student"], strict=True)
@@ -181,9 +183,9 @@ def main() -> int:
         v1_list = []
         v2_list = []
         for j in range(start, end):
-            v1, v2 = ds[idxs[j]]
-            v1_list.append(v1)
-            v2_list.append(v2)
+            views, _spacing = ds[idxs[j]]
+            v1_list.append(views[0])
+            v2_list.append(views[1])
 
         x1 = torch.stack(v1_list, dim=0).to(device, non_blocking=True)
         x2 = torch.stack(v2_list, dim=0).to(device, non_blocking=True)
