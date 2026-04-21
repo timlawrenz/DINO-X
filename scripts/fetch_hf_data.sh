@@ -16,7 +16,7 @@
 set -euo pipefail
 
 HF_REPO="${HF_REPO:-timlawrenz/dinox-mvp-data}"
-TAR_NAME="mvp-processed.tar.gz"
+TAR_BASE="mvp-processed.tar.gz"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -35,18 +35,39 @@ fi
 
 mkdir -p "$CACHE_DIR"
 
-echo "Downloading $TAR_NAME from $HF_REPO ..."
-huggingface-cli download "$HF_REPO" "$TAR_NAME" \
-    --repo-type dataset \
-    --local-dir "$CACHE_DIR"
+# Download split parts + metadata from HuggingFace
+echo "Downloading data from $HF_REPO ..."
+for PART in part_aa part_ab part_ac part_ad part_ae; do
+    FILE="${TAR_BASE}.${PART}"
+    if [ -f "$CACHE_DIR/$FILE" ]; then
+        echo "skip=$FILE reason=already_downloaded"
+        continue
+    fi
+    echo "download=$FILE"
+    huggingface-cli download "$HF_REPO" "$FILE" \
+        --repo-type dataset \
+        --local-dir "$CACHE_DIR"
+done
+
+# Also download index + split manifest (small files, useful standalone)
+for META in index.csv split_manifest.json; do
+    huggingface-cli download "$HF_REPO" "$META" \
+        --repo-type dataset \
+        --local-dir "$CACHE_DIR" 2>/dev/null || true
+done
+
+# Reassemble split tar and extract
+echo "Reassembling tar from parts..."
+cat "$CACHE_DIR/${TAR_BASE}".part_* > "$CACHE_DIR/$TAR_BASE"
 
 echo "Extracting to $REPO_ROOT ..."
-tar -xzf "$CACHE_DIR/$TAR_NAME" -C "$REPO_ROOT"
+tar -xzf "$CACHE_DIR/$TAR_BASE" -C "$REPO_ROOT"
 
 # Mark extraction complete
 touch "$COMPLETE_MARKER"
 
-rm -f "$CACHE_DIR/$TAR_NAME"
+# Clean up cache
+rm -f "$CACHE_DIR/${TAR_BASE}"*
 rmdir "$CACHE_DIR" 2>/dev/null || true
 
 echo "ok=true"
