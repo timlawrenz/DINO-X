@@ -1,6 +1,7 @@
 .venv*/
 __pycache__/
 *.pyc
+.cache/
 
 # Local ROCm wheel cache (large binaries, do not commit)
 rocm-wheels/
