@@ -1,0 +1,109 @@
+{
+  "kind": "panorgan_evaluation",
+  "version": 1,
+  "created_at": "2026-04-21T22:46:45.973284+00:00",
+  "checkpoint": "data/runs/eval_validation_baseline/20260421_184107/checkpoint_final_00001000.pth",
+  "step": 1000,
+  "scale_aware": false,
+  "seed": 42,
+  "val_slices": 4035,
+  "datasets": [
+    "lidc-idri",
+    "pancreas-ct"
+  ],
+  "model": {
+    "name": "vit-small",
+    "patch": 14,
+    "dim": 384,
+    "depth": 12,
+    "heads": 6
+  },
+  "metrics": {
+    "view_retrieval_per_dataset": {
+      "lidc-idri": {
+        "n": 256,
+        "top1": 0.00390625,
+        "top5": 0.0234375,
+        "random_baseline": 0.00390625,
+        "ratio_vs_random": 1.0
+      },
+      "pancreas-ct": {
+        "n": 256,
+        "top1": 0.01171875,
+        "top5": 0.04296875,
+        "random_baseline": 0.00390625,
+        "ratio_vs_random": 3.0
+      }
+    },
+    "dataset_discrimination_probe": {
+      "labels": [
+        "lidc-idri",
+        "pancreas-ct"
+      ],
+      "train_series": 13,
+      "test_series": 4,
+      "train_slices": 3172,
+      "test_slices": 863,
+      "accuracy": 0.522595596755504,
+      "accuracy_ci95": [
+        0.0,
+        1.0
+      ],
+      "auc": 0.87961487955568,
+      "note": "dataset discrimination (not organ \u2014 confounded by scanner/protocol)"
+    },
+    "spacing_counterfactual": {
+      "skipped": true,
+      "reason": "baseline model has no scale embedding"
+    },
+    "domain_clustering": {
+      "k": 10,
+      "overall_same_dataset_rate": 0.9923667905824041,
+      "expected_random_rate": 0.5268476419925404,
+      "enrichment_vs_random": 1.8835934936128174,
+      "per_dataset": {
+        "lidc-idri": {
+          "same_dataset_rate": 0.9879275653923542,
+          "expected_random": 0.6158612143742255,
+          "enrichment": 1.6041399301240038,
+          "n": 2485
+        },
+        "pancreas-ct": {
+          "same_dataset_rate": 0.9994838709677418,
+          "expected_random": 0.38413878562577447,
+          "enrichment": 2.6018822060353797,
+          "n": 1550
+        }
+      },
+      "note": "High enrichment = strong domain clustering. Not necessarily good or bad."
+    },
+    "spacing_prediction": {
+      "target": "log(spacing_x)",
+      "train_slices": 3172,
+      "test_slices": 863,
+      "r2": -0.004924178123474121,
+      "mae_log_spacing": 0.108685702085495,
+      "note": "Partly circular for scale-aware models. Use as plumbing check."
+    },
+    "embedding_stats": {
+      "per_dataset": {
+        "lidc-idri": {
+          "n": 2485,
+          "embedding_std": 0.00059972406597808,
+          "intra_cosine_to_centroid": 0.9999222159385681,
+          "pca1_spacing_correlation": -0.20381925902750683
+        },
+        "pancreas-ct": {
+          "n": 1550,
+          "embedding_std": 0.0005026000435464084,
+          "intra_cosine_to_centroid": 0.9999409317970276,
+          "pca1_spacing_correlation": 0.16780648592595157
+        }
+      },
+      "cross_dataset_centroid_cosine": {
+        "lidc-idri_vs_pancreas-ct": 0.9999550580978394
+      }
+    }
+  },
+  "seconds": 66.85479712486267
+}
