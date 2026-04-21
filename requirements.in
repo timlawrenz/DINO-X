@@ -13,3 +13,8 @@ pydicom
 # torch/torchvision/torchaudio are installed per ROCm/CUDA setup scripts / wheels
 
 tensorboard
+
+# Zoo: data registry, manifest, lineage
+pydantic
+pyyaml
+pyarrow
