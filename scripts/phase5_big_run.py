@@ -559,6 +559,7 @@ class IndexRow:
     spacing_x: float = 1.0
     spacing_y: float = 1.0
     spacing_z: float = 1.0
+    dataset: str = ""
 
 
 def _load_index_rows(index_csv: Path, require_spacing: bool = False) -> list[IndexRow]:
@@ -566,7 +567,7 @@ def _load_index_rows(index_csv: Path, require_spacing: bool = False) -> list[Ind
 
     Args:
         index_csv: Path to CSV with columns: png_path, series_dir, slice_index, encoding,
-                   and optionally spacing_x, spacing_y, spacing_z.
+                   and optionally spacing_x, spacing_y, spacing_z, dataset.
         require_spacing: If True, warn when spacing columns are missing.
     """
     rows = []
@@ -574,6 +575,7 @@ def _load_index_rows(index_csv: Path, require_spacing: bool = False) -> list[Ind
         reader = csv.DictReader(f)
         fieldnames = reader.fieldnames or []
         has_spacing = all(c in fieldnames for c in ("spacing_x", "spacing_y", "spacing_z"))
+        has_dataset = "dataset" in fieldnames
 
         if require_spacing and not has_spacing:
             warnings.warn(
@@ -592,6 +594,8 @@ def _load_index_rows(index_csv: Path, require_spacing: bool = False) -> list[Ind
                 kwargs["spacing_x"] = float(r["spacing_x"])
                 kwargs["spacing_y"] = float(r["spacing_y"])
                 kwargs["spacing_z"] = float(r["spacing_z"])
+            if has_dataset:
+                kwargs["dataset"] = r["dataset"]
             rows.append(IndexRow(**kwargs))
     return rows
 

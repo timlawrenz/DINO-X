@@ -18,3 +18,6 @@ tensorboard
 pydantic
 pyyaml
 pyarrow
+
+# Evaluation: linear probes
+scikit-learn
