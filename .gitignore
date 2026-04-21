@@ -24,3 +24,4 @@ data/
 data/**/*.png
 data/**/*.jpg
 data/**/*.jpeg
+runs/

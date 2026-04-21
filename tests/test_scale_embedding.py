@@ -20,14 +20,14 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
-# Import from phase5_big_run — it's a script, not a package
+# Import model architecture from zoo.arch (canonical source)
+from zoo.arch import DinoStudentTeacher, PatchViT, ScaleEmbedding
+
+# Data utilities still in phase5_big_run
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from phase5_big_run import (
-    DinoStudentTeacher,
     IndexRow,
-    PatchViT,
     PngDataset,
-    ScaleEmbedding,
     _load_index_rows,
     dino_collate,
 )
@@ -82,7 +82,8 @@ class TestScaleEmbedding:
 
         spacing = torch.tensor([[0.5, 0.5, 1.0]], requires_grad=True)
         out = se(spacing)
-        loss = out.sum()
+        # Use L2 loss (not sum) because sum(LayerNorm(x)) = 0 analytically
+        loss = out.pow(2).sum()
         loss.backward()
         assert spacing.grad is not None
         assert spacing.grad.abs().sum() > 0

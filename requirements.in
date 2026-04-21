@@ -21,3 +21,9 @@ pyarrow
 
 # Evaluation: linear probes
 scikit-learn
+
+# Hub: model distribution (optional for inference-only)
+huggingface_hub
+
+# PEFT: parameter-efficient fine-tuning (optional for LoRA)
+peft

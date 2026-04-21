@@ -32,12 +32,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import math
 import random
 import sys
 import time
+import warnings
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,18 +67,21 @@ except Exception:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Module loading
+# Model architecture imports
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _load_phase5_module() -> Any:
-    p = Path(__file__).resolve().parent / "phase5_big_run.py"
-    spec = importlib.util.spec_from_file_location("phase5_big_run", p)
-    if spec is None or spec.loader is None:
-        raise SystemExit(f"Failed to load module spec from: {p}")
-    m = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = m
-    spec.loader.exec_module(m)
-    return m
+from zoo.arch import (  # noqa: E402
+    DinoStudentTeacher,
+    PatchViT,
+    migrate_state_dict,
+    needs_migration,
+)
+
+# Data utilities still live in phase5_big_run.py — add scripts/ to path
+_scripts_dir = str(Path(__file__).resolve().parent)
+if _scripts_dir not in sys.path:
+    sys.path.insert(0, _scripts_dir)
+from phase5_big_run import ModelConfig, PngDataset, _load_index_rows  # noqa: E402
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -235,7 +238,6 @@ def metric_view_retrieval_per_dataset(
     topk: int = 5,
 ) -> dict:
     """Run view retrieval independently per dataset (uses random augmentation)."""
-    m = _load_phase5_module()
 
     datasets: dict[str, list] = defaultdict(list)
     for r in rows:
@@ -247,7 +249,7 @@ def metric_view_retrieval_per_dataset(
         n = min(n_per_dataset, len(ds_rows))
         idxs = rng.sample(range(len(ds_rows)), k=n)
 
-        ds = m.PngDataset(
+        ds = PngDataset(
             ds_rows,
             img_size=img_size,
             rw_level_min=float(cfg.get("rw_level_min", -400.0)),
@@ -726,26 +728,30 @@ def main() -> int:
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    m = _load_phase5_module()
-
     device = torch.device(args.device) if args.device else torch.device(
         "cuda" if torch.cuda.is_available() else "cpu"
     )
 
     # Load checkpoint
     payload = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+
+    # Migrate old-format state dict keys if needed
+    if "student" in payload and needs_migration(payload["student"]):
+        warnings.warn("Migrating old-format student state dict keys to timm-style")
+        payload["student"] = migrate_state_dict(payload["student"])
+
     step = int(payload.get("step", 0) or 0)
     cfg = payload.get("config", {})
     model_cfg = cfg.get("model", {})
 
-    if isinstance(model_cfg, m.ModelConfig):
+    if isinstance(model_cfg, ModelConfig):
         mc = model_cfg
     else:
-        mc = m.ModelConfig(**model_cfg)
+        mc = ModelConfig(**model_cfg)
 
     img_size = int(cfg.get("img_size", 224))
 
-    vit = m.PatchViT(
+    vit = PatchViT(
         img_size=img_size,
         patch=mc.patch,
         dim=mc.dim,
@@ -755,14 +761,14 @@ def main() -> int:
         use_grad_checkpoint=False,
         scale_aware=args.scale_aware,
     )
-    student = m.DinoStudentTeacher(vit, out_dim=mc.out_dim).to(device)
+    student = DinoStudentTeacher(vit, out_dim=mc.out_dim).to(device)
     student.load_state_dict(payload["student"], strict=True)
     student.eval()
 
     # Load val rows
     split_data = json.loads(args.split_manifest.read_text())
     val_series = set(str(s) for s in split_data.get("val", {}).get("series_dir", []))
-    all_rows = m._load_index_rows(args.index_csv)
+    all_rows = _load_index_rows(args.index_csv)
     rows = [r for r in all_rows if str(r.series_dir) in val_series]
 
     if not rows:

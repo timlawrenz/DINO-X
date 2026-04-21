@@ -375,175 +375,17 @@ def compute_data_manifest_hash(index_csv: Path) -> str | None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Model Architecture (from Phase 3)
+# Model Architecture — imported from zoo.arch
 # ─────────────────────────────────────────────────────────────────────────────
 
-class PatchViT(nn.Module):
-    """Patch-based Vision Transformer."""
-    def __init__(
-        self,
-        img_size: int = 224,
-        patch: int = 16,
-        dim: int = 384,
-        depth: int = 6,
-        heads: int = 6,
-        mlp_ratio: float = 4.0,
-        use_grad_checkpoint: bool = False,
-        num_registers: int = 4,
-        scale_aware: bool = False,
-    ) -> None:
-        super().__init__()
-        assert img_size % patch == 0
-        self.img_size = img_size
-        self.patch = patch
-        self.dim = dim
-        self.use_grad_checkpoint = use_grad_checkpoint
-        self.num_registers = num_registers
-        self.scale_aware = scale_aware
-
-        self.patch_embed = nn.Conv2d(3, dim, kernel_size=patch, stride=patch, bias=True)
-        n_patches = (img_size // patch) * (img_size // patch)
-
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, 1 + n_patches, dim))
-        
-        if num_registers > 0:
-            self.registers = nn.Parameter(torch.zeros(1, num_registers, dim))
-
-        if scale_aware:
-            self.scale_embed = ScaleEmbedding(dim)
-
-        self.blocks = nn.ModuleList([
-            TransformerBlock(dim, heads, mlp_ratio) for _ in range(depth)
-        ])
-        self.norm = nn.LayerNorm(dim)
-        
-        self.apply(self._init_weights)
-
-        # Re-apply zero-init for ScaleEmbedding output projection AFTER
-        # self.apply() which would have overwritten it with xavier_uniform.
-        if scale_aware:
-            nn.init.zeros_(self.scale_embed.mlp[2].weight)
-            nn.init.zeros_(self.scale_embed.mlp[2].bias)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            nn.init.xavier_uniform_(m.weight)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
-        
-        # Specific init for tokens
-        nn.init.trunc_normal_(self.pos_embed, std=0.1)
-        nn.init.trunc_normal_(self.cls_token, std=0.02)
-        nn.init.trunc_normal_(self.patch_embed.weight, std=0.02)
-        
-        if self.num_registers > 0:
-            nn.init.trunc_normal_(self.registers, std=0.02)
-
-    def forward(self, x: torch.Tensor, spacing: torch.Tensor | None = None) -> torch.Tensor:
-        B = x.size(0)
-        x = self.patch_embed(x)
-        x = x.flatten(2).transpose(1, 2)
-
-        cls_tokens = self.cls_token.expand(B, -1, -1)
-        x = torch.cat([cls_tokens, x], dim=1)
-        x = x + self.pos_embed
-
-        # Scale embedding: add physical spacing information to all tokens
-        if self.scale_aware and spacing is not None:
-            x = x + self.scale_embed(spacing)  # (B, 1, dim) broadcasts over seq
-        
-        if self.num_registers > 0:
-            regs = self.registers.expand(B, -1, -1)
-            # Concatenate registers AFTER pos + scale embeddings
-            x = torch.cat([x, regs], dim=1)
-
-        for blk in self.blocks:
-            if self.use_grad_checkpoint and self.training:
-                x = torch.utils.checkpoint.checkpoint(blk, x, use_reentrant=False)
-            else:
-                x = blk(x)
-
-        x = self.norm(x)
-        return x
-
-
-class TransformerBlock(nn.Module):
-    """Transformer block with attention and MLP."""
-    def __init__(self, dim: int, heads: int, mlp_ratio: float = 4.0) -> None:
-        super().__init__()
-        self.norm1 = nn.LayerNorm(dim)
-        self.attn = nn.MultiheadAttention(dim, heads, batch_first=True)
-        self.norm2 = nn.LayerNorm(dim)
-        mlp_dim = int(dim * mlp_ratio)
-        self.mlp = nn.Sequential(
-            nn.Linear(dim, mlp_dim),
-            nn.GELU(),
-            nn.Linear(mlp_dim, dim),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.attn(self.norm1(x), self.norm1(x), self.norm1(x), need_weights=False)[0]
-        x = x + self.mlp(self.norm2(x))
-        return x
-
-
-class ScaleEmbedding(nn.Module):
-    """Projects physical spacing (pixel_spacing_x, pixel_spacing_y, slice_thickness) → embed_dim.
-
-    Enables scale-aware representation learning: the model natively knows that a
-    14×14 patch at 0.5 mm covers 7 mm of tissue, while the same patch at 1.5 mm
-    covers 21 mm. Spacing is treated as a continuous signal (not categorical) so
-    the model can generalize to unseen resolutions.
-
-    The output Linear is **zero-initialized** so that:
-    - A freshly created ScaleEmbedding produces all-zero vectors.
-    - Checkpoints trained *without* scale awareness resume identically when the
-      module is added (gradual learning, no sudden perturbation).
-    """
-
-    def __init__(self, embed_dim: int) -> None:
-        super().__init__()
-        hidden = max(embed_dim // 4, 16)
-        self.mlp = nn.Sequential(
-            nn.Linear(3, hidden),
-            nn.GELU(),
-            nn.Linear(hidden, embed_dim),
-            nn.LayerNorm(embed_dim),
-        )
-        # Zero-init the output projection so the embedding starts as a no-op.
-        nn.init.zeros_(self.mlp[2].weight)
-        nn.init.zeros_(self.mlp[2].bias)
-
-    def forward(self, spacing: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            spacing: (B, 3) — [pixel_spacing_x, pixel_spacing_y, slice_thickness] in mm.
-
-        Returns:
-            (B, 1, embed_dim) — broadcast-ready for addition to patch embeddings.
-        """
-        return self.mlp(spacing).unsqueeze(1)
-
-
-class DinoStudentTeacher(nn.Module):
-    """DINO student/teacher wrapper with projection head."""
-    def __init__(self, backbone: nn.Module, out_dim: int = 8192) -> None:
-        super().__init__()
-        self.backbone = backbone
-        self.head = nn.Sequential(
-            nn.Linear(backbone.dim, backbone.dim),
-            nn.GELU(),
-            nn.Linear(backbone.dim, out_dim),
-        )
-
-    def forward(self, x: torch.Tensor, spacing: torch.Tensor | None = None) -> torch.Tensor:
-        feats = self.backbone(x, spacing=spacing)
-        cls_token = feats[:, 0]
-        return self.head(cls_token)
+from zoo.arch import (  # noqa: E402
+    DinoStudentTeacher,
+    PatchViT,
+    ScaleEmbedding,
+    TransformerBlock,
+    migrate_state_dict,
+    needs_migration,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1210,7 +1052,13 @@ def load_checkpoint(
     
     # PyTorch 2.6+ defaults weights_only=True; we store config/RNG (trusted)
     payload = torch.load(path, map_location=device, weights_only=False)
-    
+
+    # Migrate old-format state dict keys (nn.MultiheadAttention → timm-style)
+    for key in ("student", "teacher"):
+        if key in payload and needs_migration(payload[key]):
+            warnings.warn(f"Migrating old-format {key} state dict keys to timm-style")
+            payload[key] = migrate_state_dict(payload[key])
+
     # Detect scale_aware mismatch between checkpoint and current model
     ckpt_config = payload.get("config", {})
     ckpt_scale_aware = ckpt_config.get("scale_aware", False)
