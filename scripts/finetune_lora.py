@@ -280,6 +280,44 @@ class FinetuneModel(nn.Module):
 # ---------------------------------------------------------------------------
 
 
+def _compute_auroc(probs: torch.Tensor, targets: torch.Tensor) -> float:
+    """Compute AUROC for binary classification (no sklearn dependency).
+
+    Uses the rank-based formula: AUROC = (sum_of_positive_ranks - n_pos*(n_pos+1)/2) / (n_pos * n_neg)
+    """
+    probs_np = probs.numpy()
+    targets_np = targets.numpy()
+
+    pos_mask = targets_np == 1
+    n_pos = pos_mask.sum()
+    n_neg = len(targets_np) - n_pos
+
+    if n_pos == 0 or n_neg == 0:
+        return 0.5  # undefined, return chance
+
+    # Rank-based AUROC (handles ties correctly)
+    order = np.argsort(probs_np)
+    ranks = np.empty_like(order, dtype=np.float64)
+    ranks[order] = np.arange(1, len(probs_np) + 1, dtype=np.float64)
+
+    # Handle ties: average ranks for tied values
+    sorted_probs = probs_np[order]
+    i = 0
+    while i < len(sorted_probs):
+        j = i + 1
+        while j < len(sorted_probs) and sorted_probs[j] == sorted_probs[i]:
+            j += 1
+        if j > i + 1:
+            avg_rank = np.mean(np.arange(i + 1, j + 1, dtype=np.float64))
+            for k in range(i, j):
+                ranks[order[k]] = avg_rank
+        i = j
+
+    sum_pos_ranks = ranks[pos_mask].sum()
+    auroc = (sum_pos_ranks - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg)
+    return float(auroc)
+
+
 def compute_metrics(
     preds: torch.Tensor,
     targets: torch.Tensor,
@@ -294,6 +332,12 @@ def compute_metrics(
         correct = (pred_labels == targets).sum().item()
         total = targets.size(0)
         metrics["accuracy"] = correct / total if total > 0 else 0.0
+
+        # AUROC for binary classification
+        if num_classes == 2:
+            # Use softmax probability of the positive class
+            probs = torch.softmax(preds, dim=-1)[:, 1]
+            metrics["auroc"] = _compute_auroc(probs, targets)
 
         # Per-class accuracy and macro-F1
         if num_classes > 1:
@@ -510,6 +554,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--warmup-epochs", type=int, default=3)
     parser.add_argument("--patience", type=int, default=10,
                         help="Early stopping patience (epochs)")
+    parser.add_argument("--es-metric", default="loss",
+                        help="Early stopping metric: 'loss' (lower is better) or "
+                             "any metric name like 'auroc' (higher is better)")
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--no-amp", action="store_true",
                         help="Disable mixed precision")
@@ -647,12 +694,15 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     # ── Training loop ──────────────────────────────────────────────────
-    best_val_loss = float("inf")
+    # Early stopping: higher-is-better metrics vs lower-is-better
+    es_metric = args.es_metric
+    es_higher_is_better = es_metric != "loss"
+    best_es_value = float("-inf") if es_higher_is_better else float("inf")
     patience_counter = 0
     start_time = time.time()
 
     logger.info("Starting training: %d epochs, %d steps/epoch", args.epochs, len(train_loader))
-    logger.info("AMP: %s, Device: %s", amp_enabled, device)
+    logger.info("AMP: %s, Device: %s, ES metric: %s", amp_enabled, device, es_metric)
 
     for epoch in range(1, args.epochs + 1):
         epoch_start = time.time()
@@ -681,9 +731,26 @@ def main(argv: list[str] | None = None) -> None:
             " ".join(metric_parts), epoch_time,
         )
 
-        # Early stopping check
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        # Get early stopping metric value
+        if es_metric == "loss":
+            current_es = val_loss
+        elif es_metric in val_metrics:
+            current_es = val_metrics[es_metric]
+        else:
+            logger.warning(
+                "ES metric '%s' not found in val_metrics %s, falling back to loss",
+                es_metric, list(val_metrics.keys()),
+            )
+            current_es = val_loss
+            es_higher_is_better = False
+
+        improved = (
+            current_es > best_es_value if es_higher_is_better
+            else current_es < best_es_value
+        )
+
+        if improved:
+            best_es_value = current_es
             patience_counter = 0
 
             ft_config.best_epoch = epoch
@@ -691,7 +758,7 @@ def main(argv: list[str] | None = None) -> None:
             ft_config.best_val_metrics = val_metrics
 
             save_finetune(model, args.output, ft_config)
-            logger.info("  ✓ Saved best model (val_loss=%.4f)", val_loss)
+            logger.info("  ✓ Saved best model (%s=%.4f)", es_metric, current_es)
         else:
             patience_counter += 1
             if patience_counter >= args.patience:

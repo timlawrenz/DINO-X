@@ -10,7 +10,7 @@
 #      - Pancreas: on NAS at pancreas-ct/processed-hu16/_index/index.csv
 #      - MSD Colon: on NAS at msd-colon/index.csv
 #      - MSD Hepatic: on NAS at msd-hepatic-vessel/index.csv
-#      - CQ500:   data/processed/cq500/index.csv (generated in step 1)
+#      - CQ500:   data/cq500/processed-hu16/index.csv (generated after preprocessing)
 #
 # This script:
 #   1. Combines all 5 datasets into one CSV
@@ -28,7 +28,7 @@ LIDC_IDX="${NAS}/lidc-idri/processed-hu16/_index/index_with_spacing.csv"
 PANCREAS_IDX="${NAS}/pancreas-ct/processed-hu16/_index/index.csv"
 MSD_COLON_IDX="${NAS}/msd-colon/index.csv"
 MSD_HEPATIC_IDX="${NAS}/msd-hepatic-vessel/index.csv"
-CQ500_IDX="data/processed/cq500/index.csv"
+CQ500_IDX="data/cq500/processed-hu16/index.csv"
 
 echo "=== Checking per-dataset indices ==="
 for f in "$LIDC_IDX" "$PANCREAS_IDX" "$MSD_COLON_IDX" "$MSD_HEPATIC_IDX"; do
@@ -46,8 +46,8 @@ if [ ! -f "$CQ500_IDX" ]; then
     echo ""
     echo "To preprocess CQ500, run:"
     echo "  python scripts/preprocessing/phase2_preprocess_lidc_idri.py \\"
-    echo "    --dicom-root data/raw/cq500 \\"
-    echo "    --out-root data/processed \\"
+    echo "    --dicom-root data/cq500/raw \\"
+    echo "    --out-root data/cq500 \\"
     echo "    --dataset-name cq500"
     exit 1
 fi

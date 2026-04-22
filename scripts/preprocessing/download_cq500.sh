@@ -16,13 +16,13 @@
 # Slices: ~193K across 491 head CTs
 #
 # Output:
-#   data/raw/cq500/          — Raw DICOM files
-#   data/processed/cq500/    — 16-bit HU PNG slices
+#   data/cq500/raw/          — Raw DICOM files (NAS via symlink)
+#   data/processed/cq500/    — 16-bit HU PNG slices (shared processed root)
 #   data/processed/cq500/index.csv — Per-slice index with spacing metadata
 #
 set -euo pipefail
 
-RAW_DIR="data/raw/cq500"
+RAW_DIR="data/cq500/raw"
 PROCESSED_DIR="data/processed"
 DATASET_NAME="cq500"
 
