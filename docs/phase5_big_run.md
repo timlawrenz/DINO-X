@@ -219,6 +219,19 @@ python scripts/phase5_big_run.py \
     --pin-memory false
 ```
 
+### Attention backend (SDPA)
+
+The script exposes PyTorch scaled dot product attention (SDPA) selection via `--sdp-backend`.
+
+- **ROCm:** `--sdp-backend auto` prefers `mem_efficient` (and disables `flash`), with `math` left enabled as a safe fallback.
+- **CUDA:** `--sdp-backend auto` leaves PyTorch defaults unchanged.
+
+If you hit ROCm kernel instability (e.g. `HIP error: unspecified launch failure`), explicitly force:
+
+```bash
+python scripts/phase5_big_run.py --sdp-backend mem_efficient
+```
+
 ### Gradient Accumulation
 
 Achieve large effective batch sizes:

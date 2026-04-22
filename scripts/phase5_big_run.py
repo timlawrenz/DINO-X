@@ -1074,17 +1074,27 @@ def _set_rng_state(state: dict[str, Any]) -> None:
             torch.cuda.set_rng_state_all(cuda_states)
 
 
-def _set_sdp_backend(backend: str) -> None:
-    """Set scaled dot product attention backend."""
-    if backend == "auto":
-        return
-    
+def _set_sdp_backend(backend: str, *, is_rocm: bool = False) -> None:
+    """Set scaled dot product attention backend.
+
+    On ROCm, "auto" can select flash kernels that are sometimes unstable depending on
+    driver/runtime; prefer mem_efficient with math enabled as a fallback.
+    """
     if not hasattr(torch.backends.cuda, "enable_flash_sdp"):
         return
-    
+
+    if backend == "auto":
+        if is_rocm:
+            torch.backends.cuda.enable_flash_sdp(False)
+            torch.backends.cuda.enable_mem_efficient_sdp(True)
+            torch.backends.cuda.enable_math_sdp(True)
+        return
+
     torch.backends.cuda.enable_flash_sdp(backend == "flash")
     torch.backends.cuda.enable_mem_efficient_sdp(backend == "mem_efficient")
-    torch.backends.cuda.enable_math_sdp(backend == "math")
+
+    # On ROCm, keep math enabled as a safe fallback when mem_efficient can't run.
+    torch.backends.cuda.enable_math_sdp(backend == "math" or (is_rocm and backend == "mem_efficient"))
 
 
 def save_checkpoint(
@@ -1422,7 +1432,7 @@ def main() -> None:
           f"(batch={args.batch_size} × accum={args.accumulation_steps})")
     
     _seed_all(args.train_seed)
-    _set_sdp_backend(args.sdp_backend)
+    _set_sdp_backend(args.sdp_backend, is_rocm=hw_cfg.is_rocm)
     
     device = torch.device(hw_cfg.device_type)
     print(f"device={device.type}")
