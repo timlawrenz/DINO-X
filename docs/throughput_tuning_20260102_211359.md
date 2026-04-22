@@ -92,7 +92,7 @@ For future tuning / big-run dry-runs:
 You ran preprocessing prior to tuning:
 
 ```bash
-python3 scripts/phase2_preprocess_lidc_idri.py --dicom-root data/raw --out-root data/processed
+python3 scripts/preprocessing/phase2_preprocess_lidc_idri.py --dicom-root data/raw --out-root data/processed
 ```
 
 (As of 2026-01-02, the preprocessor defaults to incremental behavior: it skips PNG regeneration for already-existing output series folders and re-indexes existing PNGs into `data/processed/_index/index.csv`.)

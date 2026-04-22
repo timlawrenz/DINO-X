@@ -1,6 +1,9 @@
 .venv*/
 __pycache__/
 *.pyc
+.cache/
+.DS_Store
+.env
 
 # Local ROCm wheel cache (large binaries, do not commit)
 rocm-wheels/
@@ -8,7 +11,7 @@ rocm-wheels/
 # Local logs / captures
 *.log
 
-# Phase 2 data (never commit raw medical data or derived datasets)
+# Medical data (never commit raw medical data or derived datasets)
 data/
 
 # Common medical imaging formats (raw)
@@ -23,3 +26,7 @@ data/
 data/**/*.png
 data/**/*.jpg
 data/**/*.jpeg
+
+# Training runs and checkpoints
+runs/
+checkpoints/

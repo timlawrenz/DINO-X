@@ -1,0 +1,40 @@
+name: msd-colon
+modality: ct
+organs:
+  - colon
+source_url: http://medicaldecathlon.com/
+license: CC-BY-SA-4.0
+license_url: https://creativecommons.org/licenses/by-sa/4.0/
+redistribution: allowed_with_conditions
+redistribution_note: >
+  CC-BY-SA-4.0 permits redistribution provided attribution is given
+  and derivative works use the same license (ShareAlike).
+  Preferred: point users to the original MSD source.
+attribution_required: true
+attribution: >
+  Medical Segmentation Decathlon — Task 10 (Colon).
+  Cite Antonelli et al. (2022). Original data: http://medicaldecathlon.com/
+total_slices: 13486
+total_series: 126
+pixel_spacing_range: [0.54, 0.98]
+slice_thickness_range: [1.3, 7.5]
+hu_range: [-1024, 3071]
+annotations:
+  - colon_tumor_segmentation
+preprocessing:
+  format: png_16bit
+  hu_shift: 32768
+  scale: 10
+  index_csv: _index/index.csv
+citation: >
+  Antonelli M, Reinke A, Bakas S, et al. The Medical Segmentation
+  Decathlon. Nature Communications, 2022;13:4128.
+  https://doi.org/10.1038/s41467-022-30695-9
+notes: >
+  Medical Segmentation Decathlon Task 10 (Colon Cancer). 190 patients
+  (126 training, 64 test). Primary colorectal cancer segmentation.
+  Targets highly complex, winding tubular structures that differ
+  fundamentally from solid organ masses — expands the morphological
+  diversity of the training corpus. Wide slice thickness range
+  (1.3–7.5mm, median 5.0mm). NIfTI format (.nii.gz) — requires
+  NIfTI-to-PNG conversion pipeline.

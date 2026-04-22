@@ -12,7 +12,7 @@ Place the acquired files under:
 Or set `DINOX_DATA_ROOT` and use the symlink bootstrap helper:
 
 ```bash
-DINOX_DATA_ROOT=/path/to/training-data/dino-x bash scripts/phase2_setup_data_root.sh
+DINOX_DATA_ROOT=/path/to/training-data/dino-x bash scripts/preprocessing/phase2_setup_data_root.sh
 ```
 
 After bootstrapping, `data/raw` should point at the external raw directory.
@@ -22,7 +22,7 @@ After bootstrapping, `data/raw` should point at the external raw directory.
 TCIA exposes NBIA REST endpoints to (1) list SeriesInstanceUIDs in a collection and (2) download a series as a ZIP.
 This repo includes a small helper:
 
-- `scripts/phase2_tcia_download.py`
+- `scripts/preprocessing/phase2_tcia_download.py`
 
 ### 1) List series UIDs for LIDC-IDRI (optional)
 
@@ -30,7 +30,7 @@ Note: `getSeries` returns multiple modalities; for preprocessing we want **CT** 
 
 ```bash
 # Filter to CT series and prefer series with many images (slices).
-python3 scripts/phase2_tcia_download.py list-series \
+python3 scripts/preprocessing/phase2_tcia_download.py list-series \
   --collection LIDC-IDRI \
   --modality CT \
   --min-image-count 50 \
@@ -44,7 +44,7 @@ This resolves the series list and downloads it in one step.
 It is **resumable by default**: re-run the same command after an interruption.
 
 ```bash
-python3 scripts/phase2_tcia_download.py download-collection \
+python3 scripts/preprocessing/phase2_tcia_download.py download-collection \
   --collection LIDC-IDRI \
   --modality CT \
   --min-image-count 50 \
@@ -63,7 +63,7 @@ Example:
 
 ```bash
 export TCIA_API_KEY=...  # if needed
-python3 scripts/phase2_tcia_download.py list-series --collection LIDC-IDRI --modality CT --min-image-count 50 --sort-by imagecount --out /tmp/lidc_ct_series_uids.txt
+python3 scripts/preprocessing/phase2_tcia_download.py list-series --collection LIDC-IDRI --modality CT --min-image-count 50 --sort-by imagecount --out /tmp/lidc_ct_series_uids.txt
 ```
 
 ## Provenance / manifest
@@ -71,7 +71,7 @@ python3 scripts/phase2_tcia_download.py list-series --collection LIDC-IDRI --mod
 After acquisition, write a minimal manifest JSON (counts + total bytes) for traceability:
 
 ```bash
-python3 scripts/phase2_write_dataset_manifest.py \
+python3 scripts/preprocessing/phase2_write_dataset_manifest.py \
   --dataset lidc-idri \
   --raw-root data/raw \
   --processed-root data/processed \

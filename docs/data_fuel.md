@@ -47,13 +47,13 @@ We’re building a **reproducible dataset state** from (large) external raw data
 Idempotently create the `data/` symlinks:
 
 ```bash
-bash scripts/phase2_setup_data_root.sh
+bash scripts/preprocessing/phase2_setup_data_root.sh
 ```
 
 To use a non-NAS location:
 
 ```bash
-DINOX_DATA_ROOT=/path/to/training-data/dino-x bash scripts/phase2_setup_data_root.sh
+DINOX_DATA_ROOT=/path/to/training-data/dino-x bash scripts/preprocessing/phase2_setup_data_root.sh
 ```
 
 **Why:** keeps raw/derived data off-repo, but gives scripts a stable local path.
@@ -63,7 +63,7 @@ DINOX_DATA_ROOT=/path/to/training-data/dino-x bash scripts/phase2_setup_data_roo
 (Optional) Generate a list of **CT** series UIDs with enough slices to support 2.5D:
 
 ```bash
-python3 scripts/phase2_tcia_download.py list-series \
+python3 scripts/preprocessing/phase2_tcia_download.py list-series \
   --collection LIDC-IDRI \
   --modality CT \
   --min-image-count 50 \
@@ -74,7 +74,7 @@ python3 scripts/phase2_tcia_download.py list-series \
 If you already have a UID list, you can download just those with:
 
 ```bash
-python3 scripts/phase2_tcia_download.py download-series \
+python3 scripts/preprocessing/phase2_tcia_download.py download-series \
   --uids /tmp/lidc_ct_series_uids.txt \
   --out-root data/raw
 ```
@@ -83,7 +83,7 @@ Download + extract series into `data/raw` (run under `tmux` for long downloads).
 This is **resumable by default**: re-run after an interruption.
 
 ```bash
-python3 scripts/phase2_tcia_download.py download-collection \
+python3 scripts/preprocessing/phase2_tcia_download.py download-collection \
   --collection LIDC-IDRI \
   --modality CT \
   --min-image-count 50 \
@@ -97,7 +97,7 @@ python3 scripts/phase2_tcia_download.py download-collection \
 ### 3) Preprocess (DICOM -> 16-bit HU PNG slices)
 
 ```bash
-python3 scripts/phase2_preprocess_lidc_idri.py \
+python3 scripts/preprocessing/phase2_preprocess_lidc_idri.py \
   --dicom-root data/raw \
   --out-root data/processed
 ```
@@ -109,7 +109,7 @@ python3 scripts/phase2_preprocess_lidc_idri.py \
 ### 4) Visual validation (spot-check output quality)
 
 ```bash
-python3 scripts/phase2_validate_samples.py \
+python3 scripts/preprocessing/phase2_validate_samples.py \
   --processed-root data/processed \
   --out-dir data/processed/_validation_$(date +%Y%m%d_%H%M%S) \
   --seed $(date +%s)
@@ -120,7 +120,7 @@ python3 scripts/phase2_validate_samples.py \
 ### 5) Write a provenance manifest (counts + bytes)
 
 ```bash
-python3 scripts/phase2_write_dataset_manifest.py \
+python3 scripts/preprocessing/phase2_write_dataset_manifest.py \
   --dataset lidc-idri \
   --raw-root data/raw \
   --processed-root data/processed \

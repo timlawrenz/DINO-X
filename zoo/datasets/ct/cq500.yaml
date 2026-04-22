@@ -1,0 +1,48 @@
+name: cq500
+modality: ct
+organs:
+  - brain
+  - cranial
+source_url: https://www.kaggle.com/datasets/crawford/qureai-headct
+original_url: http://headctstudy.qure.ai/
+annotations_url: https://physionet.org/content/bhx-brain-bounding-box/
+license: CC-BY-SA-4.0
+license_url: https://creativecommons.org/licenses/by-sa/4.0/
+redistribution: allowed_with_conditions
+redistribution_note: >
+  CC-BY-SA-4.0 permits redistribution with attribution and ShareAlike.
+  Original domain (headctstudy.qure.ai) is offline; community mirror
+  hosted on Kaggle (crawford/qureai-headct). PhysioNet BHX provides
+  39,668 bounding box annotations for hemorrhage detection.
+attribution_required: true
+attribution: >
+  CQ500 dataset by Qure.ai. Cite Chilamkurthy et al. (2018, The Lancet).
+  Original data: http://headctstudy.qure.ai/
+  Kaggle mirror: https://www.kaggle.com/datasets/crawford/qureai-headct
+total_slices: 193317
+total_series: 491
+pixel_spacing_range: [0.3, 0.7]
+slice_thickness_range: [0.5, 5.0]
+hu_range: [-1024, 3071]
+annotations:
+  - intracranial_hemorrhage
+  - calvarial_fracture
+  - mass_effect
+  - midline_shift
+preprocessing:
+  format: png_16bit
+  hu_shift: 32768
+  scale: 10
+  index_csv: index.csv
+citation: >
+  Chilamkurthy S, et al. Deep learning algorithms for detection of
+  critical findings in head CT scans: a retrospective study.
+  The Lancet, 2018. Dataset: http://headctstudy.qure.ai/
+notes: >
+  491 clinical head CTs (193K slices) from Qure.ai, annotated by
+  consensus of 3 independent radiologists (8, 12, 20 years experience).
+  Largest publicly available brain CT dataset. Highly heterogeneous
+  scanner protocols — exactly what a self-supervised model needs to
+  prevent overfitting to a single scanner type. Multi-protocol head
+  CT with wide slice thickness range (0.5–5.0mm). DICOM format (26.6 GB).
+  Original site offline; now hosted on Kaggle.

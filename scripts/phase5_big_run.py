@@ -35,11 +35,17 @@ import os
 import random
 import signal
 import subprocess
+import sys
 import time
 import warnings
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+# Ensure repo root is on sys.path so `zoo` package is importable
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 # Optional import helpers
 def _need(mod: str) -> None:
@@ -63,6 +69,7 @@ try:
     import torch.nn as nn
     import torch.nn.functional as F
     from torch.utils.tensorboard import SummaryWriter
+    from torchvision import transforms
 except Exception:
     _need("torch")
 
@@ -81,9 +88,13 @@ def make_attention_heatmap(
         feats = model.backbone(batch[0:1]) # (1, N+1, D)
     model.train()
     
-    # L2 norm of patch tokens (skip CLS)
-    patch_tokens = feats[:, 1:, :] # (1, N, D)
-    norms = torch.norm(patch_tokens, dim=-1).squeeze(0) # (N,)
+    # L2 norm of patch tokens (skip CLS and skip Registers if present)
+    # feats: (1, N_total, D)
+    # Patches are at [1 : 1+N_patches]
+    num_patches = model.backbone.patch_embed.grid_size[0] * model.backbone.patch_embed.grid_size[1] if hasattr(model.backbone.patch_embed, 'grid_size') else int((model.backbone.img_size // model.backbone.patch)**2)
+    
+    patch_tokens = feats[:, 1 : 1 + num_patches, :] # (1, N_patches, D)
+    norms = torch.norm(patch_tokens, dim=-1).squeeze(0) # (N_patches,)
     
     # Normalize to [0, 1]
     norms = (norms - norms.min()) / (norms.max() - norms.min() + 1e-8)
@@ -96,6 +107,38 @@ def make_attention_heatmap(
     # We return the small heatmap; TensorBoard handles resizing if needed,
     # or we can rely on the viewer. 
     return heatmap
+
+
+def make_gram_heatmap(
+    model: DinoStudentTeacher,
+    batch: torch.Tensor,
+) -> np.ndarray:
+    """Generate Gram matrix visualization for the first image in batch."""
+    model.eval()
+    with torch.no_grad():
+        feats = model.backbone(batch[0:1]) # (1, N+1, D)
+    model.train()
+    
+    # Compute Gram matrix of patch tokens (skip CLS)
+    # feats: (1, N+1, D) -> patches: (1, N, D)
+    patches = feats[:, 1:, :] 
+    
+    # Normalize features first (standard Gram practice)
+    patches = F.normalize(patches, p=2, dim=-1)
+    
+    # Gram: (1, N, N)
+    gram = torch.bmm(patches, patches.transpose(1, 2)).squeeze(0) # (N, N)
+    
+    # Convert to numpy
+    gram_np = gram.cpu().numpy()
+    
+    # Contrast Stretching: Map [min, max] to [0, 1]
+    g_min = gram_np.min()
+    g_max = gram_np.max()
+    gram_img = (gram_np - g_min) / (g_max - g_min + 1e-8)
+    
+    return gram_img
+
 
 
 
@@ -135,6 +178,24 @@ class ModelConfig:
 
 # Model configuration presets
 MODEL_CONFIGS = {
+    "vit-tiny": ModelConfig(
+        name="vit-tiny",
+        patch=14,
+        dim=192,
+        depth=12,
+        heads=3,
+        mlp_ratio=4.0,
+        out_dim=4096,
+    ),
+    "vit-small": ModelConfig(
+        name="vit-small",
+        patch=14,
+        dim=384,
+        depth=12,
+        heads=6,
+        mlp_ratio=4.0,
+        out_dim=8192,
+    ),
     "vit-large": ModelConfig(
         name="vit-large",
         patch=14,
@@ -196,11 +257,24 @@ class TrainingConfig:
     ema: float = 0.996
     teacher_temp: float = 0.04
     student_temp: float = 0.1
+    center_momentum: float = 0.9
+    
+    loss_type: str = "dino"
     
     # Gram anchoring - ALWAYS ENABLED (required for medical imaging)
     # Without Gram Anchoring, the model will collapse on CT scans
     gram_enabled: bool = True  # DO NOT CHANGE - hardcoded to True
     gram_weight: float = 1.0
+    koleo_weight: float = 0.0
+    
+    # Scale awareness
+    scale_aware: bool = False
+    
+    # Anti-memorization
+    crop_scale_min: float = 0.3
+    crop_scale_max: float = 1.0
+    z_stride: int = 1
+    diverse_batches: bool = False
     
     # Checkpointing
     ckpt_every: int = 100
@@ -212,6 +286,7 @@ class TrainingConfig:
     # Seeds and reproducibility
     train_seed: int = 0
     sdp_backend: str = "auto"
+    amp_dtype: str = "bfloat16"
     
     # Data paths
     index_csv: str = "data/processed/_index/index.csv"
@@ -322,93 +397,17 @@ def compute_data_manifest_hash(index_csv: Path) -> str | None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Model Architecture (from Phase 3)
+# Model Architecture — imported from zoo.arch
 # ─────────────────────────────────────────────────────────────────────────────
 
-class PatchViT(nn.Module):
-    """Patch-based Vision Transformer."""
-    def __init__(
-        self,
-        img_size: int = 224,
-        patch: int = 16,
-        dim: int = 384,
-        depth: int = 6,
-        heads: int = 6,
-        mlp_ratio: float = 4.0,
-        use_grad_checkpoint: bool = False,
-    ) -> None:
-        super().__init__()
-        assert img_size % patch == 0
-        self.img_size = img_size
-        self.patch = patch
-        self.dim = dim
-        self.use_grad_checkpoint = use_grad_checkpoint
-
-        self.patch_embed = nn.Conv2d(3, dim, kernel_size=patch, stride=patch, bias=True)
-        n_patches = (img_size // patch) * (img_size // patch)
-
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, 1 + n_patches, dim))
-
-        self.blocks = nn.ModuleList([
-            TransformerBlock(dim, heads, mlp_ratio) for _ in range(depth)
-        ])
-        self.norm = nn.LayerNorm(dim)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        B = x.size(0)
-        x = self.patch_embed(x)
-        x = x.flatten(2).transpose(1, 2)
-
-        cls_tokens = self.cls_token.expand(B, -1, -1)
-        x = torch.cat([cls_tokens, x], dim=1)
-        x = x + self.pos_embed
-
-        for blk in self.blocks:
-            if self.use_grad_checkpoint and self.training:
-                x = torch.utils.checkpoint.checkpoint(blk, x, use_reentrant=False)
-            else:
-                x = blk(x)
-
-        x = self.norm(x)
-        return x
-
-
-class TransformerBlock(nn.Module):
-    """Transformer block with attention and MLP."""
-    def __init__(self, dim: int, heads: int, mlp_ratio: float = 4.0) -> None:
-        super().__init__()
-        self.norm1 = nn.LayerNorm(dim)
-        self.attn = nn.MultiheadAttention(dim, heads, batch_first=True)
-        self.norm2 = nn.LayerNorm(dim)
-        mlp_dim = int(dim * mlp_ratio)
-        self.mlp = nn.Sequential(
-            nn.Linear(dim, mlp_dim),
-            nn.GELU(),
-            nn.Linear(mlp_dim, dim),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.attn(self.norm1(x), self.norm1(x), self.norm1(x), need_weights=False)[0]
-        x = x + self.mlp(self.norm2(x))
-        return x
-
-
-class DinoStudentTeacher(nn.Module):
-    """DINO student/teacher wrapper with projection head."""
-    def __init__(self, backbone: nn.Module, out_dim: int = 8192) -> None:
-        super().__init__()
-        self.backbone = backbone
-        self.head = nn.Sequential(
-            nn.Linear(backbone.dim, backbone.dim),
-            nn.GELU(),
-            nn.Linear(backbone.dim, out_dim),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        feats = self.backbone(x)
-        cls_token = feats[:, 0]
-        return self.head(cls_token)
+from zoo.arch import (  # noqa: E402
+    DinoStudentTeacher,
+    PatchViT,
+    ScaleEmbedding,
+    TransformerBlock,
+    migrate_state_dict,
+    needs_migration,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -421,22 +420,47 @@ class IndexRow:
     series_dir: str
     slice_index: int
     encoding: str
+    spacing_x: float = 1.0
+    spacing_y: float = 1.0
+    spacing_z: float = 1.0
+    dataset: str = ""
 
 
-def _load_index_rows(index_csv: Path) -> list[IndexRow]:
-    """Load index CSV."""
+def _load_index_rows(index_csv: Path, require_spacing: bool = False) -> list[IndexRow]:
+    """Load index CSV.
+
+    Args:
+        index_csv: Path to CSV with columns: png_path, series_dir, slice_index, encoding,
+                   and optionally spacing_x, spacing_y, spacing_z, dataset.
+        require_spacing: If True, warn when spacing columns are missing.
+    """
     rows = []
     with open(index_csv, newline="") as f:
         reader = csv.DictReader(f)
-        for r in reader:
-            rows.append(
-                IndexRow(
-                    png_path=Path(r["png_path"]),
-                    series_dir=r["series_dir"],
-                    slice_index=int(r["slice_index"]),
-                    encoding=r["encoding"],
-                )
+        fieldnames = reader.fieldnames or []
+        has_spacing = all(c in fieldnames for c in ("spacing_x", "spacing_y", "spacing_z"))
+        has_dataset = "dataset" in fieldnames
+
+        if require_spacing and not has_spacing:
+            warnings.warn(
+                f"--scale-aware is enabled but {index_csv} lacks spacing_x/spacing_y/spacing_z columns. "
+                "Defaulting to (1.0, 1.0, 1.0) — the model won't learn real scale awareness."
             )
+
+        for r in reader:
+            kwargs: dict[str, Any] = {
+                "png_path": Path(r["png_path"]),
+                "series_dir": r["series_dir"],
+                "slice_index": int(r["slice_index"]),
+                "encoding": r["encoding"],
+            }
+            if has_spacing:
+                kwargs["spacing_x"] = float(r["spacing_x"])
+                kwargs["spacing_y"] = float(r["spacing_y"])
+                kwargs["spacing_z"] = float(r["spacing_z"])
+            if has_dataset:
+                kwargs["dataset"] = r["dataset"]
+            rows.append(IndexRow(**kwargs))
     return rows
 
 
@@ -450,6 +474,9 @@ class PngDataset(torch.utils.data.Dataset):
         rw_level_max: float = 400.0,
         rw_width_min: float = 800.0,
         rw_width_max: float = 2000.0,
+        scale_aware: bool = False,
+        crop_scale_min: float = 0.3,
+        crop_scale_max: float = 1.0,
     ):
         self.rows = rows
         self.img_size = img_size
@@ -457,6 +484,13 @@ class PngDataset(torch.utils.data.Dataset):
         self.rw_level_max = rw_level_max
         self.rw_width_min = rw_width_min
         self.rw_width_max = rw_width_max
+        self.scale_aware = scale_aware
+
+        self.transform = transforms.Compose([
+            transforms.RandomResizedCrop(img_size, scale=(crop_scale_min, crop_scale_max), interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.RandomHorizontalFlip(),
+            transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+        ])
 
         # Map series for 3-slice context (z-1, z, z+1)
         self._series_map: dict[str, dict[int, Path]] = {}
@@ -483,16 +517,10 @@ class PngDataset(torch.utils.data.Dataset):
         wmax = level + width / 2.0
         windowed = (hu - wmin) / max(width, 1.0)
         windowed = np.clip(windowed, 0.0, 1.0)
-        
-        # Resize to model input size
-        if windowed.shape != (self.img_size, self.img_size):
-            img_pil = Image.fromarray((windowed * 255).astype(np.uint8))
-            img_pil = img_pil.resize((self.img_size, self.img_size), Image.Resampling.BILINEAR)
-            windowed = np.array(img_pil, dtype=np.float32) / 255.0
             
         return windowed
 
-    def __getitem__(self, idx: int) -> list[torch.Tensor]:
+    def __getitem__(self, idx: int) -> tuple[list[torch.Tensor], torch.Tensor]:
         # Robust data loading loop
         attempts = 0
         while attempts < 10:
@@ -518,10 +546,15 @@ class PngDataset(torch.utils.data.Dataset):
                     
                     slices = [self._load_hu01(p, level, width) for p in paths]
                     x = np.stack(slices, axis=0) # (3, H, W)
-                    return torch.from_numpy(x).contiguous()
+                    return self.transform(torch.from_numpy(x).contiguous())
+
+                spacing = torch.tensor(
+                    [row.spacing_x, row.spacing_y, row.spacing_z],
+                    dtype=torch.float32,
+                )
 
                 # Return two different windowed views for DINO cross-view prediction
-                return [_get_view(), _get_view()]
+                return [_get_view(), _get_view()], spacing
             
             except Exception as e:
                 print(f"⚠️  Data loading error at index {idx} ({self.rows[idx].png_path}): {e}")
@@ -531,6 +564,82 @@ class PngDataset(torch.utils.data.Dataset):
         
         # Fallback if 10 attempts fail (unlikely)
         raise RuntimeError("Failed to load data after 10 attempts")
+
+
+class DiverseBatchSampler(torch.utils.data.Sampler):
+    """Round-robin batch sampler ensuring at most one sample per series per batch.
+
+    Prevents same-series collisions that create trivially easy contrastive pairs.
+    Each epoch sees all samples; they are just rearranged into series-diverse batches.
+    """
+
+    def __init__(self, rows: list, batch_size: int, drop_last: bool = True,
+                 generator: torch.Generator | None = None):
+        self.batch_size = batch_size
+        self.drop_last = drop_last
+        self.generator = generator
+
+        # Group indices by series_dir
+        self._series_indices: dict[str, list[int]] = {}
+        for i, row in enumerate(rows):
+            self._series_indices.setdefault(row.series_dir, []).append(i)
+
+        self._total = len(rows)
+
+    def __len__(self) -> int:
+        if self.drop_last:
+            return self._total // self.batch_size
+        return (self._total + self.batch_size - 1) // self.batch_size
+
+    def __iter__(self):
+        # Shuffle indices within each series
+        queues: list[list[int]] = []
+        for indices in self._series_indices.values():
+            perm = torch.randperm(len(indices), generator=self.generator).tolist()
+            queues.append([indices[i] for i in perm])
+
+        # Shuffle series order
+        series_order = torch.randperm(len(queues), generator=self.generator).tolist()
+        queues = [queues[i] for i in series_order]
+
+        # Interleave: round-robin one sample from each series
+        interleaved: list[int] = []
+        while queues:
+            next_round: list[list[int]] = []
+            for q in queues:
+                interleaved.append(q.pop())
+                if q:
+                    next_round.append(q)
+            queues = next_round
+
+        # Chunk into batches
+        for i in range(0, len(interleaved) - self.batch_size + 1, self.batch_size):
+            yield interleaved[i : i + self.batch_size]
+
+        # Final partial batch
+        remainder = interleaved[len(interleaved) // self.batch_size * self.batch_size :]
+        if remainder and not self.drop_last:
+            yield remainder
+
+
+def dino_collate(
+    batch: list[tuple[list[torch.Tensor], torch.Tensor]],
+) -> tuple[list[torch.Tensor], torch.Tensor]:
+    """Custom collate for PngDataset that returns (views, spacing).
+
+    Args:
+        batch: List of (views_list, spacing_tensor) from PngDataset.__getitem__
+
+    Returns:
+        ([view1_batch, view2_batch], spacing_batch) where:
+        - view1_batch, view2_batch: (B, 3, H, W)
+        - spacing_batch: (B, 3)
+    """
+    views_lists, spacings = zip(*batch)
+    v1 = torch.stack([v[0] for v in views_lists])
+    v2 = torch.stack([v[1] for v in views_lists])
+    spacing_batch = torch.stack(list(spacings))
+    return [v1, v2], spacing_batch
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -565,7 +674,7 @@ def get_lr(
 
 class DINOLoss(nn.Module):
     """DINO loss with centering and sharpening to prevent collapse."""
-    def __init__(self, out_dim: int, center_momentum: float = 0.9) -> None:
+    def __init__(self, out_dim: int, center_momentum: float = 0.999) -> None:
         super().__init__()
         self.center_momentum = center_momentum
         self.register_buffer("center", torch.zeros(1, out_dim))
@@ -624,6 +733,290 @@ def compute_gram_anchoring_loss(
     teacher_gram = compute_gram_matrix(teacher_feats[:, 1:])
     loss = F.mse_loss(student_gram, teacher_gram)
     return loss
+
+
+class KoLeoLoss(nn.Module):
+    """Kozachenko-Leonenko differential entropy regularization.
+    
+    Forces features to be uniformly distributed on the hypersphere, preventing collapse.
+    """
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, student_output: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+        """
+        student_output: (B, D) tensor of features (CLS tokens).
+        """
+        # Normalize features
+        x = F.normalize(student_output, p=2, dim=-1)
+        
+        # Compute pairwise distances
+        # dist(i, j) = 2 - 2 * cos(i, j)
+        # We can just use pdist
+        pdist = torch.cdist(x, x, p=2) # (B, B)
+        
+        # Mask diagonal (distance to self is 0)
+        B = x.shape[0]
+        # Create a mask with infinity on diagonal
+        eye = torch.eye(B, device=x.device)
+        pdist = pdist + eye * 1e9
+        
+        # Find distance to nearest neighbor for each sample
+        min_dist, _ = pdist.min(dim=1) # (B,)
+        
+        # Maximize entropy = Maximize log(min_dist) = Minimize -log(min_dist)
+        loss = -torch.log(min_dist + eps).mean()
+        return loss
+
+
+class SimCLRLoss(nn.Module):
+    """SimCLR / NT-Xent Loss.
+    
+    Explicitly uses negative samples from the batch to prevent collapse.
+    robust, but requires large batch sizes (which we have via accumulation).
+    """
+    def __init__(self, temperature: float = 0.1) -> None:
+        super().__init__()
+        self.temperature = temperature
+
+    def forward(self, z1: torch.Tensor, z2: torch.Tensor) -> torch.Tensor:
+        """
+        z1, z2: (B, D) feature vectors from view 1 and view 2.
+        """
+        z1 = F.normalize(z1, dim=1)
+        z2 = F.normalize(z2, dim=1)
+        
+        # Concatenate: (2B, D)
+        features = torch.cat([z1, z2], dim=0)
+        B = z1.shape[0]
+        
+        # Similarity matrix: (2B, 2B)
+        sim_matrix = torch.matmul(features, features.T) / self.temperature
+        
+        # Mask out self-similarity
+        mask = torch.eye(2 * B, device=features.device).bool()
+        sim_matrix.masked_fill_(mask, -9e15)
+        
+        # Positive targets
+        # For i in 0..B-1 (z1), positive is i+B (z2)
+        # For i in B..2B-1 (z2), positive is i-B (z1)
+        target = torch.cat([
+            torch.arange(B, 2 * B, device=features.device),
+            torch.arange(0, B, device=features.device)
+        ], dim=0)
+        
+        loss = F.cross_entropy(sim_matrix, target)
+        return loss
+
+
+class MaeDecoder(nn.Module):
+    """Lightweight decoder for MAE reconstruction."""
+    def __init__(
+        self,
+        embed_dim: int,
+        patch_size: int,
+        num_patches: int,
+        decoder_dim: int = 512,
+        decoder_depth: int = 8,
+        decoder_heads: int = 16,
+        mlp_ratio: float = 4.0,
+    ) -> None:
+        super().__init__()
+        self.embed_dim = embed_dim
+        self.decoder_dim = decoder_dim
+        self.num_patches = num_patches
+        self.patch_size = patch_size
+
+        self.decoder_embed = nn.Linear(embed_dim, decoder_dim, bias=True)
+        self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_dim))
+        
+        # Fixed 2D sin-cos pos embedding for decoder (recomputed on init)
+        self.decoder_pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, decoder_dim), requires_grad=False)
+
+        self.blocks = nn.ModuleList([
+            TransformerBlock(decoder_dim, decoder_heads, mlp_ratio) for _ in range(decoder_depth)
+        ])
+        
+        self.decoder_norm = nn.LayerNorm(decoder_dim)
+        self.decoder_pred = nn.Linear(decoder_dim, patch_size**2 * 3, bias=True) 
+
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+        nn.init.normal_(self.mask_token, std=0.02)
+
+    def forward(self, x: torch.Tensor, ids_restore: torch.Tensor) -> torch.Tensor:
+        # Embed latent tokens
+        x = self.decoder_embed(x)
+
+        # Append mask tokens to sequence
+        mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1)
+        x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token
+        x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle
+        x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token
+
+        # Add pos embed
+        x = x + self.decoder_pos_embed
+
+        # Apply Transformer blocks
+        for blk in self.blocks:
+            x = blk(x)
+        x = self.decoder_norm(x)
+
+        # Predict pixels
+        x = self.decoder_pred(x)
+        return x[:, 1:, :] # remove cls token
+
+
+class MaeModel(nn.Module):
+    """MAE Wrapper: Encoder + Masking + Decoder."""
+    def __init__(self, encoder: PatchViT, decoder_dim: int = 512, mask_ratio: float = 0.75):
+        super().__init__()
+        self.encoder = encoder
+        self.mask_ratio = mask_ratio
+        
+        # Infer patch count
+        img_size = encoder.img_size
+        patch_size = encoder.patch
+        num_patches = (img_size // patch_size) ** 2
+        
+        self.decoder = MaeDecoder(
+            embed_dim=encoder.dim,
+            patch_size=patch_size,
+            num_patches=num_patches,
+            decoder_dim=decoder_dim
+        )
+        
+        # Initialize decoder pos embed (simple sin-cos)
+        self.decoder.decoder_pos_embed.data.copy_(
+            self._get_2d_sincos_pos_embed(self.decoder.decoder_pos_embed.shape[-1], int(num_patches**0.5), cls_token=True)
+        )
+
+    def _get_2d_sincos_pos_embed(self, embed_dim, grid_size, cls_token=False):
+        # Simplified numpy-based init
+        grid_h = np.arange(grid_size, dtype=np.float32)
+        grid_w = np.arange(grid_size, dtype=np.float32)
+        grid = np.meshgrid(grid_w, grid_h)  # here w goes first
+        grid = np.stack(grid, axis=0)
+
+        grid = grid.reshape([2, 1, grid_size, grid_size])
+        pos_embed = self._get_2d_sincos_pos_embed_from_grid(embed_dim, grid)
+        if cls_token:
+            pos_embed = np.concatenate([np.zeros([1, embed_dim]), pos_embed], axis=0)
+        return torch.from_numpy(pos_embed).float().unsqueeze(0)
+
+    def _get_2d_sincos_pos_embed_from_grid(self, embed_dim, grid):
+        assert embed_dim % 2 == 0
+        emb_h = self._get_1d_sincos_pos_embed_from_grid(embed_dim // 2, grid[0])  # (H*W, D/2)
+        emb_w = self._get_1d_sincos_pos_embed_from_grid(embed_dim // 2, grid[1])  # (H*W, D/2)
+        emb = np.concatenate([emb_h, emb_w], axis=1) # (H*W, D)
+        return emb
+
+    def _get_1d_sincos_pos_embed_from_grid(self, embed_dim, pos):
+        assert embed_dim % 2 == 0
+        omega = np.arange(embed_dim // 2, dtype=np.float32)
+        omega /= embed_dim / 2.
+        omega = 1. / 10000**omega  # (D/2,)
+
+        pos = pos.reshape(-1)  # (M,)
+        out = np.einsum('m,d->md', pos, omega)  # (M, D/2)
+
+        emb_sin = np.sin(out) # (M, D/2)
+        emb_cos = np.cos(out) # (M, D/2)
+
+        emb = np.concatenate([emb_sin, emb_cos], axis=1)  # (M, D)
+        return emb
+
+    def patchify(self, imgs):
+        """
+        imgs: (N, 3, H, W)
+        x: (N, L, patch_size**2 *3)
+        """
+        p = self.encoder.patch
+        assert imgs.shape[2] == imgs.shape[3] and imgs.shape[2] % p == 0
+
+        h = w = imgs.shape[2] // p
+        x = imgs.reshape(shape=(imgs.shape[0], 3, h, p, w, p))
+        x = torch.einsum('nchpwq->nhwpqc', x)
+        x = x.reshape(shape=(imgs.shape[0], h * w, p**2 * 3))
+        return x
+
+    def forward_loss(self, imgs, pred, mask):
+        """
+        imgs: [N, 3, H, W]
+        pred: [N, L, p*p*3]
+        mask: [N, L], 0 is keep, 1 is remove, 
+        """
+        target = self.patchify(imgs)
+        
+        # Mean over patch pixels?
+        # We compute MSE per patch
+        loss = (pred - target) ** 2
+        loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
+
+        loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
+        return loss
+
+    def random_masking(self, x, mask_ratio):
+        """
+        x: [N, L, D], sequence
+        """
+        N, L, D = x.shape  # batch, length, dim
+        len_keep = int(L * (1 - mask_ratio))
+        
+        noise = torch.rand(N, L, device=x.device)  # noise in [0, 1]
+        
+        # sort noise for each sample
+        ids_shuffle = torch.argsort(noise, dim=1)  # ascend: small is keep, large is remove
+        ids_restore = torch.argsort(ids_shuffle, dim=1)
+
+        # keep the first subset
+        ids_keep = ids_shuffle[:, :len_keep]
+        x_masked = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D))
+
+        # generate the binary mask: 0 is keep, 1 is remove
+        mask = torch.ones([N, L], device=x.device)
+        mask[:, :len_keep] = 0
+        # unshuffle to get the binary mask
+        mask = torch.gather(mask, dim=1, index=ids_restore)
+
+        return x_masked, mask, ids_restore
+
+    def forward(self, imgs):
+        # 1. Patch Embed
+        x = self.encoder.patch_embed(imgs)
+        x = x.flatten(2).transpose(1, 2)
+        
+        # 2. Add Pos Embed (before masking!)
+        # encoder.pos_embed has CLS. We need to handle it.
+        # x is (B, N, D). pos_embed is (1, N+1, D).
+        pos_embed_sans_cls = self.encoder.pos_embed[:, 1:, :]
+        x = x + pos_embed_sans_cls
+
+        # 3. Masking
+        x_masked, mask, ids_restore = self.random_masking(x, self.mask_ratio)
+
+        # 4. Append CLS token
+        cls_token = self.encoder.cls_token + self.encoder.pos_embed[:, :1, :]
+        cls_tokens = cls_token.expand(x.shape[0], -1, -1)
+        x_masked = torch.cat([cls_tokens, x_masked], dim=1)
+
+        # 5. Encoder Blocks
+        for blk in self.encoder.blocks:
+            x_masked = blk(x_masked)
+        x_masked = self.encoder.norm(x_masked)
+
+        # 6. Decoder
+        pred = self.decoder(x_masked, ids_restore)
+        
+        return pred, mask
 
 
 class _StopFlag:
@@ -736,16 +1129,38 @@ def load_checkpoint(
     scaler: torch.amp.GradScaler,
     dino_loss: DINOLoss,
     device: torch.device,
+    scale_aware: bool = False,
 ) -> tuple[int, TrainingConfig]:
-    """Load training checkpoint."""
+    """Load training checkpoint.
+
+    When loading a non-scale-aware checkpoint into a scale-aware model (or vice
+    versa), uses ``strict=False`` so that missing/unexpected ``scale_embed.*``
+    keys are silently skipped rather than raising an error.
+    """
     if not path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {path}")
     
     # PyTorch 2.6+ defaults weights_only=True; we store config/RNG (trusted)
     payload = torch.load(path, map_location=device, weights_only=False)
+
+    # Migrate old-format state dict keys (nn.MultiheadAttention → timm-style)
+    for key in ("student", "teacher"):
+        if key in payload and needs_migration(payload[key]):
+            warnings.warn(f"Migrating old-format {key} state dict keys to timm-style")
+            payload[key] = migrate_state_dict(payload[key])
+
+    # Detect scale_aware mismatch between checkpoint and current model
+    ckpt_config = payload.get("config", {})
+    ckpt_scale_aware = ckpt_config.get("scale_aware", False)
+    strict = (ckpt_scale_aware == scale_aware)
+    if not strict:
+        warnings.warn(
+            f"Scale-aware mismatch: checkpoint={ckpt_scale_aware}, current={scale_aware}. "
+            "Loading with strict=False (scale_embed weights will be freshly initialized)."
+        )
     
-    student.load_state_dict(payload["student"], strict=True)
-    teacher.load_state_dict(payload["teacher"], strict=True)
+    student.load_state_dict(payload["student"], strict=strict)
+    teacher.load_state_dict(payload["teacher"], strict=strict)
     opt.load_state_dict(payload["opt"])
     
     if payload.get("scaler") is not None:
@@ -856,10 +1271,20 @@ def main() -> None:
     ap.add_argument("--ema", type=float, default=0.996)
     ap.add_argument("--teacher-temp", type=float, default=0.04)
     ap.add_argument("--student-temp", type=float, default=0.1)
+    ap.add_argument("--center-momentum", type=float, default=0.9, help="Momentum for DINO centering (default: 0.9, recommended: 0.999 for stability)")
     
     # Gram anchoring (REQUIRED for medical imaging - DO NOT DISABLE)
     ap.add_argument("--gram-weight", type=float, default=1.0, help="Gram Anchoring weight (default: 1.0)")
+    ap.add_argument("--koleo-weight", type=float, default=0.0, help="KoLeo regularization weight (default: 0.0)")
     
+    # Loss Type
+    ap.add_argument("--loss-type", choices=["dino", "simclr", "mae"], default="dino", help="Objective function")
+
+    # Scale Awareness
+    ap.add_argument("--scale-aware", action="store_true",
+                    help="Enable scale embedding: injects (pixel_spacing_x, pixel_spacing_y, slice_thickness) "
+                         "into the ViT. Requires spacing_x/spacing_y/spacing_z columns in index CSV.")
+
     # Checkpointing
     ap.add_argument("--ckpt-every", type=int, default=100)
     ap.add_argument("--ckpt-keep-last", type=int, default=5)
@@ -871,6 +1296,15 @@ def main() -> None:
     # Data
     ap.add_argument("--index-csv", type=Path, default=Path("data/processed/_index/index.csv"))
     ap.add_argument("--split-manifest", type=Path, help="Split manifest JSON (excludes val set)")
+    ap.add_argument("--crop-scale-min", type=float, default=0.3,
+                    help="Min scale for RandomResizedCrop (default: 0.3)")
+    ap.add_argument("--crop-scale-max", type=float, default=1.0,
+                    help="Max scale for RandomResizedCrop (default: 1.0)")
+    ap.add_argument("--z-stride", type=int, default=1,
+                    help="Keep every Nth slice per series to reduce z-axis correlation "
+                         "(default: 1 = all slices, 3 = removes adjacent channel overlap)")
+    ap.add_argument("--diverse-batches", action="store_true",
+                    help="Use series-diverse batch sampling (at most one sample per series per batch)")
     
     # Reproducibility
     ap.add_argument("--train-seed", type=int, default=0)
@@ -882,8 +1316,21 @@ def main() -> None:
     
     # AMP
     ap.add_argument("--amp", action="store_true", help="Use mixed precision training")
-    
+    ap.add_argument("--amp-dtype", choices=["float16", "bfloat16"], default="bfloat16",
+                    help="AMP dtype (default: bfloat16 — same exponent range as fp32, "
+                         "avoids overflow/underflow in contrastive losses)")
+
+    # JSON-lines metrics log (one line per step, for programmatic consumers)
+    ap.add_argument("--log-json", type=Path, default=None,
+                    help="Write one JSON line per training step to this file")
+
     args = ap.parse_args()
+
+    # Resolve AMP dtype
+    amp_dtype = {"float16": torch.float16, "bfloat16": torch.bfloat16}[args.amp_dtype]
+    # bf16 has the same exponent range as fp32, so GradScaler is unnecessary
+    # and can actually hurt training stability. Only enable for fp16.
+    use_grad_scaler = args.amp and amp_dtype == torch.float16
     
     # ─────────────────────────────────────────────────────────────────────────
     # 1. Configuration Setup
@@ -918,6 +1365,7 @@ def main() -> None:
 
     print(f"model_config={model_cfg.name} patch={model_cfg.patch} dim={model_cfg.dim} "
           f"depth={model_cfg.depth} heads={model_cfg.heads} out_dim={model_cfg.out_dim} "
+          f"entropy_wall={math.log(model_cfg.out_dim):.4f} "
           f"params={model_cfg.params_millions:.1f}M "
           f"grad_checkpoint={args.grad_checkpoint}")
     
@@ -958,13 +1406,22 @@ def main() -> None:
         ema=args.ema,
         teacher_temp=args.teacher_temp,
         student_temp=args.student_temp,
+        center_momentum=args.center_momentum,
+        loss_type=args.loss_type,
         gram_enabled=True,  # Always enabled - required for medical imaging
         gram_weight=args.gram_weight,
+        koleo_weight=args.koleo_weight,
+        scale_aware=args.scale_aware,
+        crop_scale_min=args.crop_scale_min,
+        crop_scale_max=args.crop_scale_max,
+        z_stride=args.z_stride,
+        diverse_batches=args.diverse_batches,
         ckpt_every=args.ckpt_every,
         ckpt_keep_last=args.ckpt_keep_last,
         monitor_every=args.monitor_every,
         train_seed=args.train_seed,
         sdp_backend=args.sdp_backend,
+        amp_dtype=args.amp_dtype,
         index_csv=str(args.index_csv),
         split_manifest=str(args.split_manifest) if args.split_manifest else None,
         git_commit=git_commit,
@@ -980,6 +1437,7 @@ def main() -> None:
     device = torch.device(hw_cfg.device_type)
     print(f"device={device.type}")
     print(f"torch_version={torch.__version__}")
+    print(f"amp={args.amp} dtype={args.amp_dtype} grad_scaler={use_grad_scaler}")
     
     # ─────────────────────────────────────────────────────────────────────────
     # 2. Run Directory and Resume Logic
@@ -1023,8 +1481,8 @@ def main() -> None:
     # 3. Data Loading
     # ─────────────────────────────────────────────────────────────────────────
     
-    all_rows = _load_index_rows(args.index_csv)
-    print(f"loaded_rows={len(all_rows)}")
+    all_rows = _load_index_rows(args.index_csv, require_spacing=args.scale_aware)
+    print(f"loaded_rows={len(all_rows)} scale_aware={args.scale_aware}")
     
     # Exclude validation set if split manifest provided
     if args.split_manifest and args.split_manifest.exists():
@@ -1035,6 +1493,19 @@ def main() -> None:
         all_rows = [r for r in all_rows if str(r.series_dir) not in val_set]
         print(f"excluded_val_series={len(val_series)} excluded_rows={before - len(all_rows)}")
     
+    # Z-stride: subsample slices to reduce z-axis correlation
+    if args.z_stride > 1:
+        from collections import defaultdict
+        series_rows: dict[str, list] = defaultdict(list)
+        for r in all_rows:
+            series_rows[r.series_dir].append(r)
+        strided = []
+        for s_dir in sorted(series_rows):
+            rows_sorted = sorted(series_rows[s_dir], key=lambda r: r.slice_index)
+            strided.extend(rows_sorted[::args.z_stride])
+        print(f"z_stride={args.z_stride} rows_before={len(all_rows)} rows_after={len(strided)}")
+        all_rows = strided
+
     def _worker_init_fn(worker_id: int) -> None:
         _seed_all(args.train_seed + worker_id)
     
@@ -1048,17 +1519,42 @@ def main() -> None:
         rw_level_max=training_cfg.rw_level_max,
         rw_width_min=training_cfg.rw_width_min,
         rw_width_max=training_cfg.rw_width_max,
+        scale_aware=args.scale_aware,
+        crop_scale_min=args.crop_scale_min,
+        crop_scale_max=args.crop_scale_max,
     )
-    dl = torch.utils.data.DataLoader(
-        ds,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=hw_cfg.num_workers,
-        pin_memory=hw_cfg.pin_memory,
-        drop_last=True,
-        generator=gen,
-        worker_init_fn=_worker_init_fn,
-    )
+    
+    if len(ds) < args.batch_size:
+        print(f"⚠️  Dataset size ({len(ds)}) is smaller than batch size ({args.batch_size}).")
+        print(f"    Reducing batch size to {len(ds)} to prevent training failure.")
+        args.batch_size = len(ds)
+        training_cfg.batch_size = args.batch_size
+
+    if args.diverse_batches:
+        batch_sampler = DiverseBatchSampler(
+            all_rows, batch_size=args.batch_size, drop_last=True, generator=gen,
+        )
+        dl = torch.utils.data.DataLoader(
+            ds,
+            batch_sampler=batch_sampler,
+            num_workers=hw_cfg.num_workers,
+            pin_memory=hw_cfg.pin_memory,
+            worker_init_fn=_worker_init_fn,
+            collate_fn=dino_collate,
+        )
+        print(f"diverse_batches=True batches_per_epoch={len(batch_sampler)}")
+    else:
+        dl = torch.utils.data.DataLoader(
+            ds,
+            batch_size=args.batch_size,
+            shuffle=True,
+            num_workers=hw_cfg.num_workers,
+            pin_memory=hw_cfg.pin_memory,
+            drop_last=True,
+            generator=gen,
+            worker_init_fn=_worker_init_fn,
+            collate_fn=dino_collate,
+        )
     it = iter(dl)
     
     # ─────────────────────────────────────────────────────────────────────────
@@ -1073,6 +1569,7 @@ def main() -> None:
         heads=model_cfg.heads,
         mlp_ratio=model_cfg.mlp_ratio,
         use_grad_checkpoint=args.grad_checkpoint,
+        scale_aware=args.scale_aware,
     )
     student = DinoStudentTeacher(vit_s, out_dim=model_cfg.out_dim).to(device)
     
@@ -1084,6 +1581,7 @@ def main() -> None:
         heads=model_cfg.heads,
         mlp_ratio=model_cfg.mlp_ratio,
         use_grad_checkpoint=args.grad_checkpoint,
+        scale_aware=args.scale_aware,
     )
     teacher = DinoStudentTeacher(vit_t, out_dim=model_cfg.out_dim).to(device)
     teacher.load_state_dict(student.state_dict())
@@ -1091,8 +1589,22 @@ def main() -> None:
         p.requires_grad_(False)
     
     opt = torch.optim.AdamW(student.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    scaler = torch.amp.GradScaler("cuda", enabled=bool(args.amp and device.type == "cuda"))
-    dino_loss_fn = DINOLoss(model_cfg.out_dim).to(device)
+    scaler = torch.amp.GradScaler("cuda", enabled=bool(use_grad_scaler and device.type == "cuda"))
+    dino_loss_fn = DINOLoss(model_cfg.out_dim, center_momentum=training_cfg.center_momentum).to(device)
+    koleo_loss_fn = KoLeoLoss().to(device)
+    simclr_loss_fn = SimCLRLoss(temperature=0.1).to(device)
+    
+    mae_model: MaeModel | None = None
+    if args.loss_type == "mae":
+        mae_model = MaeModel(vit_s, mask_ratio=0.75).to(device)
+        # In MAE mode, we optimize the whole MaeModel (encoder+decoder)
+        # Note: We reuse 'vit_s' as the encoder backbone inside MaeModel
+        opt = torch.optim.AdamW(mae_model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    else:
+        # DINO/SimCLR mode
+        opt = torch.optim.AdamW(student.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+
+    scaler = torch.amp.GradScaler("cuda", enabled=bool(use_grad_scaler and device.type == "cuda"))
     
     start_step = 0
     
@@ -1102,7 +1614,7 @@ def main() -> None:
     
     if resume_from:
         print(f"resume=true checkpoint={resume_from}")
-        start_step, loaded_cfg = load_checkpoint(resume_from, student, teacher, opt, scaler, dino_loss_fn, device)
+        start_step, loaded_cfg = load_checkpoint(resume_from, student, teacher, opt, scaler, dino_loss_fn, device, scale_aware=args.scale_aware)
         print(f"resumed_from_step={start_step}")
         
         # Check for hardware change
@@ -1154,42 +1666,72 @@ def main() -> None:
         for param_group in opt.param_groups:
             param_group["lr"] = current_lr
         
-        # Data loading: list[tensor, tensor]
+        # Data loading: ([view1, view2], spacing)
         try:
-            views = next(it)
+            views, spacing = next(it)
         except StopIteration:
             it = iter(dl)
-            views = next(it)
+            views, spacing = next(it)
         
         # views is a list of [batch_v1, batch_v2]
         # Concatenate for efficient forward pass: (2*B, 3, H, W)
         batch = torch.cat(views, dim=0).to(device, non_blocking=True)
+        # Duplicate spacing for both views (both come from the same slice)
+        spacing_2b = torch.cat([spacing, spacing], dim=0).to(device, non_blocking=True) if args.scale_aware else None
         
         # Forward pass
-        with torch.amp.autocast("cuda", enabled=scaler.is_enabled()):
-            # Get features for both DINO and Gram losses
-            student_feats = student.backbone(batch)
-            with torch.no_grad():
-                teacher_feats = teacher.backbone(batch)
-            
-            # DINO loss: use CLS token through projection head
-            student_out = student.head(student_feats[:, 0])
-            teacher_out = teacher.head(teacher_feats[:, 0])
-            
-            loss = dino_loss_fn(
-                student_out,
-                teacher_out,
-                args.student_temp,
-                args.teacher_temp,
-            )
-            
-            # Gram anchoring (optional but enabled)
+        amp_enabled = bool(args.amp and device.type == "cuda")
+        with torch.amp.autocast("cuda", dtype=amp_dtype, enabled=amp_enabled):
+            loss_dino = torch.tensor(0.0, device=device)
+            loss_simclr = torch.tensor(0.0, device=device)
+            loss_mae = torch.tensor(0.0, device=device)
             loss_gram = torch.tensor(0.0, device=device)
-            if training_cfg.gram_enabled:
-                # Reuse features from above - no double forward
-                loss_gram = compute_gram_anchoring_loss(student_feats, teacher_feats)
-                loss = loss + training_cfg.gram_weight * loss_gram
+            loss_koleo = torch.tensor(0.0, device=device)
+
+            if training_cfg.loss_type == "mae":
+                pred, mask = mae_model(batch)
+                loss = mae_model.forward_loss(batch, pred, mask)
+                loss_mae = loss
+            elif training_cfg.loss_type == "simclr":
+                student_feats = student.backbone(batch, spacing=spacing_2b)
+                student_out = student.head(student_feats[:, 0])
+                
+                # SimCLR takes z1 and z2 from student
+                # student_out is (2B, D) -> split into (B, D), (B, D)
+                B_sim = student_out.shape[0] // 2
+                z1, z2 = student_out[:B_sim], student_out[B_sim:]
+                loss = simclr_loss_fn(z1, z2)
+                loss_simclr = loss
+            else:
+                # DINO default
+                # Get features for both DINO and Gram losses
+                student_feats = student.backbone(batch, spacing=spacing_2b)
+                with torch.no_grad():
+                    teacher_feats = teacher.backbone(batch, spacing=spacing_2b)
+
+                # DINO loss: use CLS token through projection head
+                student_out = student.head(student_feats[:, 0])
+                teacher_out = teacher.head(teacher_feats[:, 0])
             
+                loss = dino_loss_fn(
+                    student_out,
+                    teacher_out,
+                    args.student_temp,
+                    args.teacher_temp,
+                )
+                loss_dino = loss
+                
+                # Gram anchoring (optional but enabled)
+                if training_cfg.gram_enabled:
+                    # Reuse features from above - no double forward
+                    loss_gram = compute_gram_anchoring_loss(student_feats, teacher_feats)
+                    loss = loss + training_cfg.gram_weight * loss_gram
+                
+                # KoLeo Regularization
+                if training_cfg.koleo_weight > 0.0:
+                    loss_koleo = koleo_loss_fn(student_out)
+                    loss = loss + training_cfg.koleo_weight * loss_koleo
+
             # Gradient accumulation
             loss = loss / args.accumulation_steps
         
@@ -1202,18 +1744,45 @@ def main() -> None:
         
         # Optimizer step (every accumulation_steps)
         if (step + 1) % args.accumulation_steps == 0:
+            # Unscale to check gradients
+            scaler.unscale_(opt)
+            
+            # Compute Grad Norm
+            total_norm = 0.0
+            for p in student.parameters():
+                if p.grad is not None:
+                    param_norm = p.grad.detach().data.norm(2)
+                    total_norm += param_norm.item() ** 2
+            total_norm = total_norm ** 0.5
+            
+            # Clip grads (optional but good for stability)
+            # torch.nn.utils.clip_grad_norm_(student.parameters(), 1.0)
+            
             scaler.step(opt)
             scaler.update()
-            opt.zero_grad()
+            opt.zero_grad(set_to_none=True)
             
             # EMA update teacher
-            with torch.no_grad():
-                for p_s, p_t in zip(student.parameters(), teacher.parameters()):
-                    p_t.data.mul_(args.ema).add_(p_s.data, alpha=1.0 - args.ema)
+            if args.loss_type == "dino":
+                with torch.no_grad():
+                    for p_s, p_t in zip(student.parameters(), teacher.parameters()):
+                        p_t.data.mul_(args.ema).add_(p_s.data, alpha=1.0 - args.ema)
+        else:
+            total_norm = 0.0 # Placeholder
         
         # Logging
         loss_val = loss.item() * args.accumulation_steps
         loss_history.append(loss_val)
+
+        # Per-step JSON-lines log (lightweight, for programmatic consumers)
+        if args.log_json is not None:
+            _jl = json.dumps({
+                "step": step,
+                "loss": round(loss_val, 6),
+                "lr": opt.param_groups[0]["lr"],
+            })
+            with open(args.log_json, "a") as _jf:
+                _jf.write(_jl + "\n")
         
         if time.time() - last_log >= 10.0 or step == start_step:
             elapsed = time.time() - t0
@@ -1229,16 +1798,24 @@ def main() -> None:
             
             # TensorBoard Scalars
             tb_writer.add_scalar("Train/Loss_Total", loss_val, step)
-            tb_writer.add_scalar("Train/Loss_DINO", loss_val - training_cfg.gram_weight * loss_gram.item(), step)
-            tb_writer.add_scalar("Train/Loss_Gram", loss_gram.item(), step)
+            tb_writer.add_scalar("Train/Loss_DINO", float(loss_dino.item()), step)
+            tb_writer.add_scalar("Train/Loss_SimCLR", float(loss_simclr.item()), step)
+            tb_writer.add_scalar("Train/Loss_MAE", float(loss_mae.item()), step)
+            tb_writer.add_scalar("Train/Loss_Gram", float(loss_gram.item()), step)
+            tb_writer.add_scalar("Train/Loss_KoLeo", float(loss_koleo.item()), step)
+            if total_norm > 0:
+                tb_writer.add_scalar("Train/Grad_Norm", float(total_norm), step)
 
-            with torch.no_grad():
-                t_prob = F.softmax((teacher_out - dino_loss_fn.center) / args.teacher_temp, dim=-1)
-                s_prob = F.softmax(student_out.detach() / args.student_temp, dim=-1)
-                t_ent = (-t_prob * torch.log(t_prob.clamp_min(1e-12))).sum(dim=-1).mean().item()
-                s_ent = (-s_prob * torch.log(s_prob.clamp_min(1e-12))).sum(dim=-1).mean().item()
-            tb_writer.add_scalar("Train/Entropy_Teacher", t_ent, step)
-            tb_writer.add_scalar("Train/Entropy_Student", s_ent, step)
+            if args.loss_type == "dino":
+                with torch.no_grad():
+                    # Use F.log_softmax (fused LogSumExp) for numerical stability.
+                    # Avoids 0 * -inf = NaN that occurs with separate softmax + log.
+                    t_logits = (teacher_out.float() - dino_loss_fn.center.float()) / args.teacher_temp
+                    s_logits = student_out.detach().float() / args.student_temp
+                    t_ent = -(F.softmax(t_logits, dim=-1) * F.log_softmax(t_logits, dim=-1)).sum(dim=-1).mean().item()
+                    s_ent = -(F.softmax(s_logits, dim=-1) * F.log_softmax(s_logits, dim=-1)).sum(dim=-1).mean().item()
+                tb_writer.add_scalar("Train/Entropy_Teacher", t_ent, step)
+                tb_writer.add_scalar("Train/Entropy_Student", s_ent, step)
 
             tb_writer.add_scalar("Train/LR", current_lr, step)
             tb_writer.add_scalar("Perf/Samples_Per_Sec", samples_per_sec, step)
@@ -1261,7 +1838,16 @@ def main() -> None:
         # Checkpointing
         if (step + 1) % args.ckpt_every == 0:
             ckpt_path = run_dir / f"checkpoint_{step+1:08d}.pth"
-            save_checkpoint(ckpt_path, step + 1, student, teacher, opt, scaler, dino_loss_fn, training_cfg)
+            
+            # Save correct model based on mode
+            if args.loss_type == "mae":
+                _student = mae_model
+                _teacher = mae_model # Dummy
+            else:
+                _student = student
+                _teacher = teacher
+
+            save_checkpoint(ckpt_path, step + 1, _student, _teacher, opt, scaler, dino_loss_fn, training_cfg)
             print(f"checkpoint_saved={ckpt_path}")
             
             # Rotate old checkpoints
@@ -1269,12 +1855,95 @@ def main() -> None:
         
         # Monitoring
         if args.monitor_every and (step + 1) % args.monitor_every == 0:
-            heatmap = make_attention_heatmap(student, batch)
-            tb_writer.add_image("Monitor/Attention", heatmap, step, dataformats="HW")
+            if args.loss_type == "mae":
+                # For MAE, visualize reconstruction
+                # pred: (B, L, 3*p*p), mask: (B, L)
+                # We need to unpatchify to see the image
+                # This is complex to do perfectly in 10 lines, so let's skip for now
+                # or just log input slice
+                input_slice = batch[0, 1, :, :].detach().cpu().numpy()
+                tb_writer.add_image("Monitor/Input", input_slice, step, dataformats="HW")
+            else:
+                heatmap = make_attention_heatmap(student, batch)
+                tb_writer.add_image("Monitor/Attention", heatmap, step, dataformats="HW")
             
-            # Log input slice (first channel of first image in batch)
-            input_slice = batch[0, 1, :, :].detach().cpu().numpy() # Middle slice
-            tb_writer.add_image("Monitor/Input", input_slice, step, dataformats="HW")
+                # Log input slice (first channel of first image in batch)
+                input_slice = batch[0, 1, :, :].detach().cpu().numpy() # Middle slice
+                tb_writer.add_image("Monitor/Input", input_slice, step, dataformats="HW")
+
+                # Create Combined Image (Side-by-Side)
+                try:
+                    # Convert input slice (float 0-1) to uint8 0-255
+                    img_h, img_w = input_slice.shape
+                    input_uint8 = (np.clip(input_slice, 0, 1) * 255).astype(np.uint8)
+                    input_pil = Image.fromarray(input_uint8, mode='L').convert('RGB')
+
+                    # Resize heatmap (float 0-1) to match input size and apply colormap simulation (red)
+                    # We'll just keep it grayscale for simplicity or simple red overlay if we wanted, 
+                    # but for side-by-side grayscale is clearest.
+                    heatmap_uint8 = (np.clip(heatmap, 0, 1) * 255).astype(np.uint8)
+                    heatmap_pil = Image.fromarray(heatmap_uint8, mode='L').resize((img_w, img_h), resample=Image.Resampling.NEAREST).convert('RGB')
+
+                    # Stitch
+                    combined = Image.new('RGB', (img_w * 2, img_h))
+                    combined.paste(input_pil, (0, 0))
+                    combined.paste(heatmap_pil, (img_w, 0))
+
+                    # Convert back to CHW for TensorBoard (or HWC if using dataformats='HWC')
+                    # tb_writer.add_image expects CHW by default or HW.
+                    # Let's use HWC string for HWC array.
+                    combined_np = np.array(combined)
+                    tb_writer.add_image("Monitor/Combined", combined_np, step, dataformats="HWC")
+
+                except Exception as e:
+                    print(f"⚠️  Monitoring visualization error: {e}")
+                
+                # Log Gram Matrix
+                try:
+                    # Debug stats
+                    with torch.no_grad():
+                        # Re-compute gram for stats (or we could have returned it)
+                        model_s = student
+                        model_s.eval()
+                        
+                        # 1. Check Embedding Layer (Start)
+                        # We need to manually call patch_embed + pos_embed to check early diversity
+                        x_in = batch[0:1]
+                        x_emb = model_s.backbone.patch_embed(x_in)
+                        x_emb = x_emb.flatten(2).transpose(1, 2)
+                        # Add CLS + Pos (simplifying just to check patch diversity)
+                        # x_emb is (1, N, D). Let's check std across N.
+                        emb_std = x_emb.std(dim=1).mean().item()
+                        
+                        # 2. Check Backbone Output (End)
+                        # Pass spacing if scale_aware (use first sample's spacing)
+                        x_spacing = spacing_2b[0:1] if spacing_2b is not None else None
+                        feats = model_s.backbone(x_in, spacing=x_spacing)
+                        
+                        # L2 norm of patch tokens (skip CLS and skip Registers if present)
+                        # feats: (1, N_total, D)
+                        # Patches are at [1 : 1+N_patches]
+                        num_patches = model_s.backbone.patch_embed.grid_size[0] * model_s.backbone.patch_embed.grid_size[1] if hasattr(model_s.backbone.patch_embed, 'grid_size') else int((model_s.backbone.img_size // model_s.backbone.patch)**2)
+                        
+                        patches = feats[:, 1 : 1 + num_patches, :] # (1, N_patches, D)
+                        
+                        patches_norm = F.normalize(patches, p=2, dim=-1)
+                        gram = torch.bmm(patches_norm, patches_norm.transpose(1, 2)).squeeze(0)
+                        
+                        g_min, g_max, g_mean = gram.min().item(), gram.max().item(), gram.mean().item()
+                        
+                        # Input stats
+                        img = batch[0]
+                        i_min, i_max, i_mean = img.min().item(), img.max().item(), img.mean().item()
+                        
+                        print(f" [Monitor] Input: min={i_min:.4f} max={i_max:.4f} mean={i_mean:.4f}")
+                        print(f" [Monitor] Embed-L0 Diversity: std={emb_std:.6f} (If 0, PatchEmbed is broken)")
+                        print(f" [Monitor] Output Gram: mean={g_mean:.4f} (If 1, Attention collapsed)")
+
+                    gram_img = make_gram_heatmap(student, batch)
+                    tb_writer.add_image("Monitor/Gram", gram_img, step, dataformats="HW")
+                except Exception as e:
+                    print(f"⚠️  Gram visualization error: {e}")
     
     # ─────────────────────────────────────────────────────────────────────────
     # 7. Final Checkpoint
@@ -1284,7 +1953,16 @@ def main() -> None:
     
     final_step = step + 1
     final_path = run_dir / f"checkpoint_final_{final_step:08d}.pth"
-    save_checkpoint(final_path, final_step, student, teacher, opt, scaler, dino_loss_fn, training_cfg)
+    
+    # Save correct model based on mode
+    if args.loss_type == "mae":
+        _student = mae_model
+        _teacher = mae_model
+    else:
+        _student = student
+        _teacher = teacher
+
+    save_checkpoint(final_path, final_step, _student, _teacher, opt, scaler, dino_loss_fn, training_cfg)
     print(f"final_checkpoint={final_path}")
     
     elapsed = time.time() - t0

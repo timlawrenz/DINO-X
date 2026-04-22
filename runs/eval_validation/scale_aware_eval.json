@@ -1,0 +1,124 @@
+{
+  "kind": "panorgan_evaluation",
+  "version": 1,
+  "created_at": "2026-04-21T22:48:07.704371+00:00",
+  "checkpoint": "data/runs/eval_validation_scale_aware/20260421_184352/checkpoint_final_00001000.pth",
+  "step": 1000,
+  "scale_aware": true,
+  "seed": 42,
+  "val_slices": 4035,
+  "datasets": [
+    "lidc-idri",
+    "pancreas-ct"
+  ],
+  "model": {
+    "name": "vit-small",
+    "patch": 14,
+    "dim": 384,
+    "depth": 12,
+    "heads": 6
+  },
+  "metrics": {
+    "view_retrieval_per_dataset": {
+      "lidc-idri": {
+        "n": 256,
+        "top1": 0.03125,
+        "top5": 0.15234375,
+        "random_baseline": 0.00390625,
+        "ratio_vs_random": 8.0
+      },
+      "pancreas-ct": {
+        "n": 256,
+        "top1": 0.0234375,
+        "top5": 0.1015625,
+        "random_baseline": 0.00390625,
+        "ratio_vs_random": 6.0
+      }
+    },
+    "dataset_discrimination_probe": {
+      "labels": [
+        "lidc-idri",
+        "pancreas-ct"
+      ],
+      "train_series": 13,
+      "test_series": 4,
+      "train_slices": 3172,
+      "test_slices": 863,
+      "accuracy": 0.522595596755504,
+      "accuracy_ci95": [
+        0.0,
+        1.0
+      ],
+      "auc": 1.0,
+      "note": "dataset discrimination (not organ \u2014 confounded by scanner/protocol)"
+    },
+    "spacing_counterfactual": {
+      "n": 128,
+      "cosine_distance_real_vs_2x": {
+        "mean": 0.0002541891299188137,
+        "std": 7.91859246611472e-05,
+        "median": 0.00024136900901794434
+      },
+      "cosine_distance_real_vs_half": {
+        "mean": 0.0005911444313824177,
+        "std": 0.00024010778603839454,
+        "median": 0.0005114078521728516
+      },
+      "cosine_distance_half_vs_2x": {
+        "mean": 0.0015911441296339035,
+        "std": 0.0005873559652240307,
+        "median": 0.0014296472072601318
+      },
+      "interpretation": "Baseline: distances ~0 (model ignores spacing metadata). Scale-aware: distances > 0 (model encodes physical scale)."
+    },
+    "domain_clustering": {
+      "k": 10,
+      "overall_same_dataset_rate": 1.0,
+      "expected_random_rate": 0.5268476419925404,
+      "enrichment_vs_random": 1.8980819506337638,
+      "per_dataset": {
+        "lidc-idri": {
+          "same_dataset_rate": 1.0,
+          "expected_random": 0.6158612143742255,
+          "enrichment": 1.6237424547283703,
+          "n": 2485
+        },
+        "pancreas-ct": {
+          "same_dataset_rate": 1.0,
+          "expected_random": 0.38413878562577447,
+          "enrichment": 2.6032258064516127,
+          "n": 1550
+        }
+      },
+      "note": "High enrichment = strong domain clustering. Not necessarily good or bad."
+    },
+    "spacing_prediction": {
+      "target": "log(spacing_x)",
+      "train_slices": 3172,
+      "test_slices": 863,
+      "r2": 0.7238372564315796,
+      "mae_log_spacing": 0.049803476780653,
+      "note": "Partly circular for scale-aware models. Use as plumbing check."
+    },
+    "embedding_stats": {
+      "per_dataset": {
+        "lidc-idri": {
+          "n": 2485,
+          "embedding_std": 0.00502465246245265,
+          "intra_cosine_to_centroid": 0.992434561252594,
+          "pca1_spacing_correlation": 0.5397642912221969
+        },
+        "pancreas-ct": {
+          "n": 1550,
+          "embedding_std": 0.0008055527578108013,
+          "intra_cosine_to_centroid": 0.9998226165771484,
+          "pca1_spacing_correlation": 0.9932170832413755
+        }
+      },
+      "cross_dataset_centroid_cosine": {
+        "lidc-idri_vs_pancreas-ct": 0.995820939540863
+      }
+    }
+  },
+  "seconds": 64.92065501213074
+}

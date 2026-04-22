@@ -10,5 +10,20 @@ numpy
 pillow
 pydicom
 
-# torch (installed per ROCm setup script / wheels)
+# torch/torchvision/torchaudio are installed per ROCm/CUDA setup scripts / wheels
+
 tensorboard
+
+# Zoo: data registry, manifest, lineage
+pydantic
+pyyaml
+pyarrow
+
+# Evaluation: linear probes
+scikit-learn
+
+# Hub: model distribution (optional for inference-only)
+huggingface_hub
+
+# PEFT: parameter-efficient fine-tuning (optional for LoRA)
+peft

@@ -10,7 +10,7 @@ Phase 4 adds two safety rails before the Phase 5 multi-day run:
 The split operates on the Phase 2 index (`data/processed/_index/index.csv`) and splits at `series_dir` granularity.
 
 ```bash
-python3 scripts/phase4_make_split_manifest.py \
+python3 scripts/preprocessing/phase4_make_split_manifest.py \
   --index-csv data/processed/_index/index.csv \
   --seed 0 \
   --val-frac 0.10
@@ -52,7 +52,7 @@ python3 scripts/phase4_monitor.py \
 Outputs are written to a timestamped directory under:
 - `data/monitor/phase4/<YYYYMMDD_HHMMSS>/`
 
-Tip: if you use `scripts/phase2_setup_data_root.sh`, `data/monitor` will be symlinked to your NAS so artifacts don’t land on local disk.
+Tip: if you use `scripts/preprocessing/phase2_setup_data_root.sh`, `data/monitor` will be symlinked to your NAS so artifacts don’t land on local disk.
 
 Artifacts:
 - `attention_heatmap.png`: a stable proxy heatmap derived from patch-token magnitudes
