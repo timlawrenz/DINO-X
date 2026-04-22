@@ -593,59 +593,33 @@ class DiverseBatchSampler(torch.utils.data.Sampler):
 
     def __iter__(self):
         # Shuffle indices within each series
-        queues: dict[str, list[int]] = {}
-        for series, indices in self._series_indices.items():
+        queues: list[list[int]] = []
+        for indices in self._series_indices.values():
             perm = torch.randperm(len(indices), generator=self.generator).tolist()
-            queues[series] = [indices[i] for i in perm]
+            queues.append([indices[i] for i in perm])
 
-        # Build batches: pick one sample from each series, round-robin
-        active_series = list(queues.keys())
         # Shuffle series order
-        perm = torch.randperm(len(active_series), generator=self.generator).tolist()
-        active_series = [active_series[i] for i in perm]
+        series_order = torch.randperm(len(queues), generator=self.generator).tolist()
+        queues = [queues[i] for i in series_order]
 
-        batch: list[int] = []
-        series_in_batch: set[str] = set()
-        deferred: list[tuple[str, int]] = []
+        # Interleave: round-robin one sample from each series
+        interleaved: list[int] = []
+        while queues:
+            next_round: list[list[int]] = []
+            for q in queues:
+                interleaved.append(q.pop())
+                if q:
+                    next_round.append(q)
+            queues = next_round
 
-        si = 0
-        while active_series or deferred:
-            # Try to fill batch from active series
-            if si < len(active_series):
-                series = active_series[si]
-                si += 1
-                if series not in series_in_batch and queues[series]:
-                    batch.append(queues[series].pop())
-                    series_in_batch.add(series)
-                    if not queues[series]:
-                        pass  # series exhausted, will be removed
-                    else:
-                        deferred.append((series, -1))  # re-enqueue
-                elif series in series_in_batch and queues[series]:
-                    deferred.append((series, -1))  # skip for now
-            else:
-                # Batch boundary or end of active list
-                if len(batch) >= self.batch_size:
-                    yield batch
-                    batch = []
-                    series_in_batch = set()
-
-                # Refill active series from deferred
-                active_series = [s for s, _ in deferred if queues.get(s)]
-                perm = torch.randperm(len(active_series), generator=self.generator).tolist()
-                active_series = [active_series[i] for i in perm]
-                deferred = []
-                si = 0
-
-                if not active_series:
-                    break
+        # Chunk into batches
+        for i in range(0, len(interleaved) - self.batch_size + 1, self.batch_size):
+            yield interleaved[i : i + self.batch_size]
 
         # Final partial batch
-        if batch:
-            if not self.drop_last:
-                yield batch
-            elif len(batch) == self.batch_size:
-                yield batch
+        remainder = interleaved[len(interleaved) // self.batch_size * self.batch_size :]
+        if remainder and not self.drop_last:
+            yield remainder
 
 
 def dino_collate(
