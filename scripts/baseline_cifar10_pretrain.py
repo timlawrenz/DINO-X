@@ -400,12 +400,11 @@ def main() -> int:
             samples_s = steps_s * cfg.effective_batch_size
 
             with torch.no_grad():
-                # Under AMP, softmax output may be float16 and `clamp_min(1e-12)` becomes 0,
-                # yielding 0 * log(0) = NaN. Do entropy math in fp32.
-                t_prob = F.softmax(((t_out - dino_loss_fn.center).float()) / cfg.teacher_temp, dim=-1)
-                s_prob = F.softmax((s_out.detach().float()) / cfg.student_temp, dim=-1)
-                t_ent = (-t_prob * torch.log(t_prob.clamp_min(1e-12))).sum(dim=-1).mean().item()
-                s_ent = (-s_prob * torch.log(s_prob.clamp_min(1e-12))).sum(dim=-1).mean().item()
+                # Use F.log_softmax (fused LogSumExp) for numerical stability.
+                t_logits = ((t_out - dino_loss_fn.center).float()) / cfg.teacher_temp
+                s_logits = (s_out.detach().float()) / cfg.student_temp
+                t_ent = -(F.softmax(t_logits, dim=-1) * F.log_softmax(t_logits, dim=-1)).sum(dim=-1).mean().item()
+                s_ent = -(F.softmax(s_logits, dim=-1) * F.log_softmax(s_logits, dim=-1)).sum(dim=-1).mean().item()
 
                 # Simple collapse proxy: std of CLS embeddings across the batch.
                 cls = s_feats[:, 0].detach()

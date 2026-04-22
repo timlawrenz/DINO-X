@@ -280,6 +280,7 @@ class TrainingConfig:
     # Seeds and reproducibility
     train_seed: int = 0
     sdp_backend: str = "auto"
+    amp_dtype: str = "bfloat16"
     
     # Data paths
     index_csv: str = "data/processed/_index/index.csv"
@@ -1232,12 +1233,21 @@ def main() -> None:
     
     # AMP
     ap.add_argument("--amp", action="store_true", help="Use mixed precision training")
+    ap.add_argument("--amp-dtype", choices=["float16", "bfloat16"], default="bfloat16",
+                    help="AMP dtype (default: bfloat16 — same exponent range as fp32, "
+                         "avoids overflow/underflow in contrastive losses)")
 
     # JSON-lines metrics log (one line per step, for programmatic consumers)
     ap.add_argument("--log-json", type=Path, default=None,
                     help="Write one JSON line per training step to this file")
 
     args = ap.parse_args()
+
+    # Resolve AMP dtype
+    amp_dtype = {"float16": torch.float16, "bfloat16": torch.bfloat16}[args.amp_dtype]
+    # bf16 has the same exponent range as fp32, so GradScaler is unnecessary
+    # and can actually hurt training stability. Only enable for fp16.
+    use_grad_scaler = args.amp and amp_dtype == torch.float16
     
     # ─────────────────────────────────────────────────────────────────────────
     # 1. Configuration Setup
@@ -1324,6 +1334,7 @@ def main() -> None:
         monitor_every=args.monitor_every,
         train_seed=args.train_seed,
         sdp_backend=args.sdp_backend,
+        amp_dtype=args.amp_dtype,
         index_csv=str(args.index_csv),
         split_manifest=str(args.split_manifest) if args.split_manifest else None,
         git_commit=git_commit,
@@ -1339,6 +1350,7 @@ def main() -> None:
     device = torch.device(hw_cfg.device_type)
     print(f"device={device.type}")
     print(f"torch_version={torch.__version__}")
+    print(f"amp={args.amp} dtype={args.amp_dtype} grad_scaler={use_grad_scaler}")
     
     # ─────────────────────────────────────────────────────────────────────────
     # 2. Run Directory and Resume Logic
@@ -1461,7 +1473,7 @@ def main() -> None:
         p.requires_grad_(False)
     
     opt = torch.optim.AdamW(student.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    scaler = torch.amp.GradScaler("cuda", enabled=bool(args.amp and device.type == "cuda"))
+    scaler = torch.amp.GradScaler("cuda", enabled=bool(use_grad_scaler and device.type == "cuda"))
     dino_loss_fn = DINOLoss(model_cfg.out_dim, center_momentum=training_cfg.center_momentum).to(device)
     koleo_loss_fn = KoLeoLoss().to(device)
     simclr_loss_fn = SimCLRLoss(temperature=0.1).to(device)
@@ -1476,7 +1488,7 @@ def main() -> None:
         # DINO/SimCLR mode
         opt = torch.optim.AdamW(student.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
-    scaler = torch.amp.GradScaler("cuda", enabled=bool(args.amp and device.type == "cuda"))
+    scaler = torch.amp.GradScaler("cuda", enabled=bool(use_grad_scaler and device.type == "cuda"))
     
     start_step = 0
     
@@ -1552,7 +1564,8 @@ def main() -> None:
         spacing_2b = torch.cat([spacing, spacing], dim=0).to(device, non_blocking=True) if args.scale_aware else None
         
         # Forward pass
-        with torch.amp.autocast("cuda", enabled=scaler.is_enabled()):
+        amp_enabled = bool(args.amp and device.type == "cuda")
+        with torch.amp.autocast("cuda", dtype=amp_dtype, enabled=amp_enabled):
             loss_dino = torch.tensor(0.0, device=device)
             loss_simclr = torch.tensor(0.0, device=device)
             loss_mae = torch.tensor(0.0, device=device)
@@ -1679,13 +1692,12 @@ def main() -> None:
 
             if args.loss_type == "dino":
                 with torch.no_grad():
-                    # Cast to float32 to avoid fp16 underflow:
-                    # softmax(x/0.1) in fp16 produces exact zeros, then
-                    # 0 * log(0) = 0 * -inf = NaN in IEEE 754.
-                    t_prob = F.softmax((teacher_out.float() - dino_loss_fn.center.float()) / args.teacher_temp, dim=-1)
-                    s_prob = F.softmax(student_out.detach().float() / args.student_temp, dim=-1)
-                    t_ent = (-t_prob * torch.log(t_prob.clamp_min(1e-12))).sum(dim=-1).mean().item()
-                    s_ent = (-s_prob * torch.log(s_prob.clamp_min(1e-12))).sum(dim=-1).mean().item()
+                    # Use F.log_softmax (fused LogSumExp) for numerical stability.
+                    # Avoids 0 * -inf = NaN that occurs with separate softmax + log.
+                    t_logits = (teacher_out.float() - dino_loss_fn.center.float()) / args.teacher_temp
+                    s_logits = student_out.detach().float() / args.student_temp
+                    t_ent = -(F.softmax(t_logits, dim=-1) * F.log_softmax(t_logits, dim=-1)).sum(dim=-1).mean().item()
+                    s_ent = -(F.softmax(s_logits, dim=-1) * F.log_softmax(s_logits, dim=-1)).sum(dim=-1).mean().item()
                 tb_writer.add_scalar("Train/Entropy_Teacher", t_ent, step)
                 tb_writer.add_scalar("Train/Entropy_Student", s_ent, step)
 
