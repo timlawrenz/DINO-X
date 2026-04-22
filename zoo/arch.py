@@ -283,8 +283,9 @@ _MLP_KEY_MAP = {
 
 # Regex for attention keys: any prefix + .attn. + old key
 _ATTN_RE = re.compile(r"^(.+\.attn)\.(in_proj_weight|in_proj_bias|out_proj\.weight|out_proj\.bias)$")
-# Regex for MLP keys: any prefix + .mlp. + sequential index
-_MLP_RE = re.compile(r"^(.+\.mlp)\.(0\.weight|0\.bias|2\.weight|2\.bias)$")
+# Regex for TransformerBlock MLP keys: blocks.N.mlp. + sequential index
+# Excludes scale_embed.mlp which uses nn.Sequential (not timm Mlp)
+_MLP_RE = re.compile(r"^((?:.*\.)?blocks\.\d+\.mlp)\.(0\.weight|0\.bias|2\.weight|2\.bias)$")
 
 
 def migrate_state_dict(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
