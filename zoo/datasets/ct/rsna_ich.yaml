@@ -5,6 +5,16 @@ organs:
   - intracranial
 source_url: https://www.kaggle.com/c/rsna-intracranial-hemorrhage-detection/data
 license: CC-BY-SA-4.0
+license_url: https://creativecommons.org/licenses/by-sa/4.0/
+redistribution: restricted
+redistribution_note: >
+  While CC-BY-SA-4.0, this data originates from a Kaggle competition.
+  Kaggle competition rules may impose additional restrictions on
+  redistribution. Users should download from Kaggle directly.
+attribution_required: true
+attribution: >
+  RSNA Intracranial Hemorrhage Detection Challenge (2019).
+  Original data: https://www.kaggle.com/c/rsna-intracranial-hemorrhage-detection
 total_slices: 41450
 total_series: 674
 pixel_spacing_range: [0.3, 0.7]

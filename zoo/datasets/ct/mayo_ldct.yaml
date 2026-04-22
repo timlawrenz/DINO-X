@@ -7,6 +7,15 @@ organs:
   - head
 source_url: https://www.cancerimagingarchive.net/collection/ldct-and-projection-data/
 license: CC-BY-3.0
+license_url: https://creativecommons.org/licenses/by/3.0/
+redistribution: prohibited
+redistribution_note: >
+  TCIA Data Usage Agreement prohibits redistribution.
+  Users must download directly from TCIA after agreeing to the DUA.
+attribution_required: true
+attribution: >
+  Data from The Cancer Imaging Archive (TCIA).
+  Cite McCollough et al. and the TCIA DOI: https://doi.org/10.7937/9npb-2637
 total_slices: 25000
 total_series: 299
 pixel_spacing_range: [0.5, 1.0]

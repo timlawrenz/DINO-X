@@ -5,6 +5,16 @@ organs:
   - hepatic_vessels
 source_url: http://medicaldecathlon.com/
 license: CC-BY-SA-4.0
+license_url: https://creativecommons.org/licenses/by-sa/4.0/
+redistribution: allowed_with_conditions
+redistribution_note: >
+  CC-BY-SA-4.0 permits redistribution provided attribution is given
+  and derivative works use the same license (ShareAlike).
+  Preferred: point users to the original MSD source.
+attribution_required: true
+attribution: >
+  Medical Segmentation Decathlon — Task 08 (Hepatic Vessel).
+  Cite Antonelli et al. (2022). Original data: http://medicaldecathlon.com/
 total_slices: 21120
 total_series: 303
 pixel_spacing_range: [0.57, 0.97]

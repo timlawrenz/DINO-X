@@ -5,6 +5,15 @@ organs:
   - cranial
 source_url: http://headctstudy.qure.ai/
 license: CC-BY-SA-4.0
+license_url: https://creativecommons.org/licenses/by-sa/4.0/
+redistribution: allowed_with_conditions
+redistribution_note: >
+  CC-BY-SA-4.0 permits redistribution with attribution and ShareAlike.
+  Registration required at http://headctstudy.qure.ai/ to download.
+attribution_required: true
+attribution: >
+  CQ500 dataset by Qure.ai. Cite Chilamkurthy et al. (2018, The Lancet).
+  Original data: http://headctstudy.qure.ai/
 total_slices: 193317
 total_series: 491
 pixel_spacing_range: [0.3, 0.7]

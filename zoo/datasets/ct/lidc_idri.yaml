@@ -4,6 +4,16 @@ organs:
   - lung
 source_url: https://wiki.cancerimagingarchive.net/display/Public/LIDC-IDRI
 license: CC-BY-NC-3.0
+license_url: https://wiki.cancerimagingarchive.net/display/Public/LIDC-IDRI#5800032accf9c67a8
+redistribution: prohibited
+redistribution_note: >
+  TCIA Data Usage Agreement prohibits redistribution.
+  Users must download directly from TCIA after agreeing to the DUA.
+  The NonCommercial clause further restricts derivative use.
+attribution_required: true
+attribution: >
+  Data from The Cancer Imaging Archive (TCIA).
+  Cite Armato et al. (2011) and the TCIA DOI: https://doi.org/10.7937/K9/TCIA.2015.LO9QL9SX
 total_slices: 243990
 total_series: 981
 pixel_spacing_range: [0.461, 0.977]

@@ -5,6 +5,15 @@ organs:
   - abdomen
 source_url: https://wiki.cancerimagingarchive.net/display/Public/Pancreas-CT
 license: CC-BY-3.0
+license_url: https://wiki.cancerimagingarchive.net/display/Public/Pancreas-CT
+redistribution: prohibited
+redistribution_note: >
+  TCIA Data Usage Agreement prohibits redistribution.
+  Users must download directly from TCIA after agreeing to the DUA.
+attribution_required: true
+attribution: >
+  Data from The Cancer Imaging Archive (TCIA).
+  Cite Roth et al. (2015) and the TCIA DOI: https://doi.org/10.7937/K9/TCIA.2016.tNB1kqBU
 total_slices: 17764
 total_series: 75
 pixel_spacing_range: [0.6641, 0.9766]
