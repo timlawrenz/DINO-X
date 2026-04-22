@@ -48,7 +48,11 @@ common:
   augmentation: spatial-only  # No intensity augmentation — HU values are calibrated
   random_window_level: [-400, 400]
   random_window_width: [800, 2000]
-  crop_scale: [0.5, 1.0]
+  crop_scale: [0.3, 1.0]  # Aggressive crops prevent augmentation exhaustion
+
+  # Anti-memorization (validated in ablation run 2026-04-22)
+  z_stride: 3              # Break z-axis contiguous memory leak
+  diverse_batches: true    # Max one sample per series per batch
 
   # Data
   img_size: 224

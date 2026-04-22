@@ -73,6 +73,10 @@ def main() -> int:
     ap.add_argument("--max-series-per-dataset", type=int, default=0,
                     help="Max series to sample per dataset (0 = all)")
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--require-spacing", action="store_true", default=True,
+                    help="Fail if any input is missing spacing columns (default: true)")
+    ap.add_argument("--no-require-spacing", action="store_false", dest="require_spacing",
+                    help="Allow missing spacing columns (fills with 1.0)")
     args = ap.parse_args()
 
     all_rows: list[dict[str, str]] = []
@@ -94,11 +98,27 @@ def main() -> int:
 
         rows = load_index(path, name, max_series=args.max_series_per_dataset, seed=args.seed)
 
-        # Ensure spacing columns exist
-        for row in rows:
-            row.setdefault("spacing_x", "1.000000")
-            row.setdefault("spacing_y", "1.000000")
-            row.setdefault("spacing_z", "1.000000")
+        # Validate or fill spacing columns
+        if rows:
+            has_spacing = all(
+                k in rows[0] and rows[0][k] != ""
+                for k in ("spacing_x", "spacing_y", "spacing_z")
+            )
+            if not has_spacing and args.require_spacing:
+                print(
+                    f"ERROR: {path} is missing spacing columns (spacing_x/y/z). "
+                    f"Scale-aware training requires per-slice spacing metadata. "
+                    f"Re-run preprocessing or use --no-require-spacing to fill with 1.0.",
+                    file=sys.stderr,
+                )
+                return 1
+            if not has_spacing:
+                print(f"  WARNING: {name}: missing spacing columns, filling with 1.0",
+                      file=sys.stderr)
+                for row in rows:
+                    row.setdefault("spacing_x", "1.000000")
+                    row.setdefault("spacing_y", "1.000000")
+                    row.setdefault("spacing_z", "1.000000")
 
         all_rows.extend(rows)
 

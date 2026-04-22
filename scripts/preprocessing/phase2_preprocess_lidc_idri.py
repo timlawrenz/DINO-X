@@ -237,11 +237,15 @@ def _quick_extract_spacing(series_dir: Path) -> SeriesSpacing:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(
+        description="Convert DICOM series to 16-bit HU PNG slices with index CSV."
+    )
     ap.add_argument("--dicom-root", type=Path, default=Path("data/raw"))
     ap.add_argument("--out-root", type=Path, default=Path("data/processed"))
     ap.add_argument("--dataset-name", type=str, default="lidc-idri",
-                    help="Name for the output subdirectory (e.g., lidc-idri, pancreas-ct)")
+                    help="Name for the output subdirectory (e.g., lidc-idri, pancreas-ct, cq500)")
+    ap.add_argument("--index-path", type=Path, default=None,
+                    help="Output index CSV path (default: {out-root}/{dataset-name}/index.csv)")
     ap.add_argument("--max-series", type=int, default=0, help="0 = no limit")
     ap.add_argument(
         "--force-reprocess",
@@ -253,7 +257,11 @@ def main() -> int:
 
     out_root = args.out_root
     dataset_name = args.dataset_name
-    index_path = out_root / "_index" / "index.csv"
+    if args.index_path is not None:
+        index_path = args.index_path
+    else:
+        # Per-dataset index: each dataset gets its own index.csv
+        index_path = out_root / dataset_name / "index.csv"
     index_path.parent.mkdir(parents=True, exist_ok=True)
 
     with index_path.open("w", newline="") as f:

@@ -1,0 +1,174 @@
+# Phase 3: CQ500 Injection — 5-Dataset Pan-Organ CT Run
+#
+# Intermediate training run after ablation validation (2026-04-22).
+# Adds CQ500 (193K brain CT slices) to the proven 4-dataset corpus.
+#
+# Anti-memorization patches LOCKED from ablation:
+#   - crop_scale_min: 0.3 (aggressive spatial augmentation)
+#   - z_stride: 3 (break contiguous slice correlation)
+#   - diverse_batches: true (max 1 sample per series per batch)
+#
+# Scheduler recalibrated for ~2× data:
+#   - warmup: 2500 steps (5% of total — proportional to ablation's 500/5000)
+#   - total: 50K steps (10× ablation, proportional to data increase)
+#   - cosine decay span: 47.5K steps (avoids early min-lr exhaustion)
+#
+# Expected behavior:
+#   - Loss spike on CQ500 injection (new domain variance) — desired
+#   - Gradual recovery as model digests brain CT patterns
+#   - View retrieval should climb past ablation's 7.0× ceiling
+#
+# Usage:
+#   # Step 1: Preprocess CQ500 DICOM → PNG
+#   python scripts/preprocessing/phase2_preprocess_lidc_idri.py \
+#     --dicom-root data/raw/cq500 \
+#     --out-root data/processed \
+#     --dataset-name cq500
+#
+#   # Step 2: Combine 5-dataset index
+#   python scripts/preprocessing/mvp_combine_indices.py \
+#     --inputs lidc-idri:data/processed/lidc-idri/index.csv \
+#     --inputs pancreas-ct:data/processed/pancreas-ct/index.csv \
+#     --inputs msd-colon:data/processed/msd-colon/index.csv \
+#     --inputs msd-hepatic-vessel:data/processed/msd-hepatic-vessel/index.csv \
+#     --inputs cq500:data/processed/cq500/index.csv \
+#     --out data/mvp/combined_5dataset.csv
+#
+#   # Step 3: Generate train/val split
+#   python scripts/preprocessing/phase4_make_split_manifest.py \
+#     --index-csv data/mvp/combined_5dataset_t2.csv \
+#     --seed 42 --val-frac 0.10 \
+#     --out data/mvp/split_manifest_5dataset.json
+#
+#   # Step 4: Run training
+#   PYTHONUNBUFFERED=1 python scripts/phase5_big_run.py \
+#     --index-csv data/mvp/combined_5dataset_t2.csv \
+#     --split-manifest data/mvp/split_manifest_5dataset.json \
+#     --run-dir runs/ \
+#     --run-suffix 5dataset-phase3 \
+#     --max-steps 50000 \
+#     --warmup-steps 2500 \
+#     --lr 2e-4 \
+#     --batch-size 32 \
+#     --accumulation-steps 4 \
+#     --ckpt-every 2500 \
+#     --ckpt-keep-last 20 \
+#     --scale-aware \
+#     --koleo-weight 0.1 \
+#     --crop-scale-min 0.3 \
+#     --z-stride 3 \
+#     --diverse-batches \
+#     --amp \
+#     --amp-dtype bfloat16
+
+# ─────────────────────────────────────────────────────────────────────
+# Model
+# ─────────────────────────────────────────────────────────────────────
+model:
+  architecture: vit-small
+  vit_patch: 14
+  vit_dim: 384
+  vit_depth: 12
+  vit_heads: 6
+  mlp_ratio: 4.0
+  num_registers: 4
+  scale_aware: true
+
+# ─────────────────────────────────────────────────────────────────────
+# Training
+# ─────────────────────────────────────────────────────────────────────
+training:
+  optimizer: adamw
+  lr: 2.0e-4
+  min_lr: 1.0e-6
+  weight_decay: 0.04
+  warmup_steps: 2500
+  max_steps: 50000
+  batch_size: 32
+  grad_accum_steps: 4
+  amp_dtype: bf16
+
+  # EMA / DINO
+  ema_decay: 0.996
+  center_momentum: 0.999
+  teacher_temp: 0.04
+  student_temp: 0.1
+
+  # Loss
+  gram_weight: 1.0
+  koleo_weight: 0.1
+
+  # Anti-memorization (ablation-validated, DO NOT RELAX)
+  crop_scale_min: 0.3
+  crop_scale_max: 1.0
+  z_stride: 3
+  diverse_batches: true
+
+  # Checkpointing
+  ckpt_every: 2500
+  ckpt_keep_last: 10
+
+# ─────────────────────────────────────────────────────────────────────
+# Data: 5 Datasets
+# ─────────────────────────────────────────────────────────────────────
+# Temperature-scaled sampling (T=2.0) balances dataset contribution.
+# Raw slice counts:
+#   lidc-idri:          164,724  (lung)
+#   cq500:              ~193,317 (brain) — NEW
+#   msd-hepatic-vessel:  48,464  (liver/vascular)
+#   pancreas-ct:         44,446  (pancreas/abdomen)
+#   msd-colon:           38,726  (colon/pelvis)
+#   Total:              ~490K → ~163K after z_stride=3
+
+datasets:
+  - name: lidc-idri
+    organs: [lung]
+    slices_raw: 164724
+
+  - name: cq500
+    organs: [brain, cranial]
+    slices_raw: 193317
+
+  - name: msd-hepatic-vessel
+    organs: [liver, hepatic_vessels]
+    slices_raw: 48464
+
+  - name: pancreas-ct
+    organs: [pancreas, abdomen]
+    slices_raw: 44446
+
+  - name: msd-colon
+    organs: [colon]
+    slices_raw: 38726
+
+sampling:
+  strategy: temperature
+  temperature: 2.0
+
+# ─────────────────────────────────────────────────────────────────────
+# Evaluation checkpoints
+# ─────────────────────────────────────────────────────────────────────
+# Run view retrieval eval at these steps to track learning trajectory.
+# Compare against ablation baseline (7.0× at step 5K).
+evaluation:
+  eval_steps: [5000, 10000, 15000, 20000, 30000, 40000, 50000]
+  metrics:
+    - view_retrieval
+    - embedding_stddev
+
+  success_criteria:
+    view_retrieval_ratio_5k: ">= 5.0"     # Must match ablation baseline
+    view_retrieval_ratio_50k: ">= 10.0"   # Target for scale-up
+    loss_no_collapse: "loss > 0.1 at all eval points"
+
+# ─────────────────────────────────────────────────────────────────────
+# Hardware
+# ─────────────────────────────────────────────────────────────────────
+hardware:
+  target_gpu: "RTX 4090 or RTX 2070S (local)"
+  estimated_steps_per_second: 2.5
+  estimated_time: "~5.5 hours"
+  notes: >
+    On RTX 2070S (8GB): use batch_size=8, grad_accum=16 for same effective batch.
+    On RTX 4090 (24GB): use batch_size=32, grad_accum=4 as configured.
+    Use PYTHONUNBUFFERED=1 to prevent stdout buffering when redirecting to file.

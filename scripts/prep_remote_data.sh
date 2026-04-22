@@ -107,8 +107,9 @@ echo "=== Step 5/9: Preprocess LIDC-IDRI (DICOM → 16-bit PNG) ==="
 python scripts/preprocessing/phase2_preprocess_lidc_idri.py \
     --dicom-root data/raw/lidc-idri \
     --out-root data/processed \
-    --dataset-name lidc-idri
-cp data/processed/_index/index.csv data/processed/_index/lidc_index.csv
+    --dataset-name lidc-idri \
+    --index-path data/processed/lidc-idri/index.csv
+cp data/processed/lidc-idri/index.csv data/processed/_index/lidc_index.csv
 echo "lidc_index=$(wc -l < data/processed/_index/lidc_index.csv) lines"
 
 # ── Step 6: Preprocess Pancreas-CT ──
@@ -117,8 +118,9 @@ echo "=== Step 6/9: Preprocess Pancreas-CT (DICOM → 16-bit PNG) ==="
 python scripts/preprocessing/phase2_preprocess_lidc_idri.py \
     --dicom-root data/raw/pancreas-ct \
     --out-root data/processed \
-    --dataset-name pancreas-ct
-cp data/processed/_index/index.csv data/processed/_index/pancreas_index.csv
+    --dataset-name pancreas-ct \
+    --index-path data/processed/pancreas-ct/index.csv
+cp data/processed/pancreas-ct/index.csv data/processed/_index/pancreas_index.csv
 echo "pancreas_index=$(wc -l < data/processed/_index/pancreas_index.csv) lines"
 
 # ── Step 7: Combine indices ──
