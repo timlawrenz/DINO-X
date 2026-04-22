@@ -148,18 +148,60 @@ stage_b:
 
 stage_c:
   name: "panorgan-ct-vits-stage-c"
-  description: "LIDC + CT-ORG + AbdomenCT-1K — full pan-organ corpus"
+  description: "Pan-organ CT corpus: lung + abdomen + neuro + vascular"
+
+  # Temperature-scaled sampling: weight_i ∝ n_i^(1/T), T=2.0 (sqrt)
+  # Softens 20:1 ratio → ~4.5:1 — prevents lung dominance and brain starvation
+  sampling:
+    strategy: temperature
+    temperature: 2.0
 
   datasets:
+    # Lung / Chest
     - name: lidc-idri
       manifest: data/manifests/lidc_idri.parquet
-      weight: 0.35
-    - name: ct-org
-      manifest: data/manifests/ct_org.parquet
-      weight: 0.25
-    - name: abdomenct-1k
-      manifest: data/manifests/abdomenct_1k.parquet
-      weight: 0.40
+      organs: [lung]
+      slices_est: 244000
+    - name: pancreas-ct
+      manifest: data/manifests/pancreas_ct.parquet
+      organs: [pancreas, abdomen]
+      slices_est: 18000
+
+    # Neuro / Brain
+    - name: rsna-ich
+      manifest: data/manifests/rsna_ich.parquet
+      organs: [brain, intracranial]
+      slices_est: 41450
+    - name: cq500
+      manifest: data/manifests/cq500.parquet
+      organs: [brain, cranial]
+      slices_est: 193317
+
+    # Multi-body / Scanner diversity
+    - name: mayo-ldct
+      manifest: data/manifests/mayo_ldct.parquet
+      organs: [head, chest, abdomen]
+      slices_est: 25000
+
+    # Abdominal / Vascular
+    - name: msd-colon
+      manifest: data/manifests/msd_colon.parquet
+      organs: [colon]
+      slices_est: 13486
+    - name: msd-hepatic-vessel
+      manifest: data/manifests/msd_hepatic_vessel.parquet
+      organs: [liver, hepatic_vessels]
+      slices_est: 21120
+
+  # Total: ~556K slices across 7 datasets, 4 organ groups
+  # Temperature-scaled weights (T=2.0, approximate):
+  #   lidc-idri:          0.286  (proportional: 0.438 → tempered down)
+  #   cq500:              0.255  (proportional: 0.347 → tempered down)
+  #   rsna-ich:           0.118  (proportional: 0.074 → tempered up)
+  #   mayo-ldct:          0.092  (proportional: 0.045 → tempered up)
+  #   msd-hepatic-vessel: 0.084  (proportional: 0.038 → tempered up)
+  #   pancreas-ct:        0.078  (proportional: 0.032 → tempered up)
+  #   msd-colon:          0.067  (proportional: 0.024 → tempered up)
 
   training:
     max_steps: 200000
@@ -168,8 +210,8 @@ stage_c:
 
   hardware:
     gpu: "RTX 4090"
-    estimated_time: "5 hours"
-    estimated_cost: "$2.50"
+    estimated_time: "8 hours"
+    estimated_cost: "$4.00"
 
   evaluation:
     - view_retrieval
@@ -178,12 +220,14 @@ stage_c:
     - spacing_r2
     - cross_dataset_centroid
     - linear_probe_malignancy
+    - organ_cluster_purity
 
   success_criteria:
     view_retrieval_ratio: ">= 8.0"
     dataset_discrimination_auc: ">= 0.90"
     spacing_r2: ">= 0.80"
     linear_probe_auc: ">= 0.85"
+    min_organ_retrieval_ratio: ">= 3.0"  # No organ group below 3× random
 
   publish:
     hub_repo: "timlawrenz/dinox-ct-vit-small-v1"

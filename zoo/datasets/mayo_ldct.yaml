@@ -1,0 +1,32 @@
+name: mayo-ldct
+modality: ct
+organs:
+  - chest
+  - lung
+  - abdomen
+  - head
+source_url: https://www.cancerimagingarchive.net/collection/ldct-and-projection-data/
+license: CC-BY-3.0
+total_slices: 25000
+total_series: 299
+pixel_spacing_range: [0.5, 1.0]
+slice_thickness_range: [0.5, 5.0]
+hu_range: [-1024, 3071]
+annotations: []
+preprocessing:
+  format: png_16bit
+  hu_shift: 32768
+  scale: 10
+  index_csv: _index/index.csv
+citation: >
+  McCollough CH, et al. Low Dose CT Image and Projection Data.
+  The Cancer Imaging Archive (TCIA).
+  https://doi.org/10.7937/9npb-2637
+notes: >
+  Mayo Clinic curated multi-body-part (head, chest, abdomen) low-dose
+  CT dataset. ~299 scans explicitly balanced between Siemens and GE
+  Healthcare scanners. Includes paired routine-dose and quarter-dose
+  reconstructions. Critical for teaching scanner-hardware invariance —
+  forces the model to ignore scanner-specific noise profiles and focus
+  on pure anatomical morphology. No annotations (self-supervised
+  training only). DICOM format with raw projection data available.

@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pytest
 
 from zoo.manifest import DataManifest
-from zoo.merge import DatasetMerger
+from zoo.merge import DatasetMerger, temperature_weights
 from zoo.models import SliceMetadata
 
 
@@ -212,3 +212,137 @@ class TestDatasetMerger:
         merger.add(m, weight=1.0)
         merged, _usage = merger.build(seed=42, total_slices=1000)
         assert len(merged) == 10
+
+
+# ---------------------------------------------------------------------------
+# Temperature-scaled sampling
+# ---------------------------------------------------------------------------
+
+
+class TestTemperatureWeights:
+    def test_proportional_at_t1(self):
+        """T=1.0 should give proportional weights."""
+        w = temperature_weights([200, 100, 50], temperature=1.0)
+        assert w[0] == pytest.approx(200 / 350)
+        assert w[1] == pytest.approx(100 / 350)
+        assert w[2] == pytest.approx(50 / 350)
+
+    def test_sqrt_at_t2(self):
+        """T=2.0 should give square-root weights."""
+        import math
+        sizes = [10000, 100]
+        w = temperature_weights(sizes, temperature=2.0)
+        # sqrt(10000) = 100, sqrt(100) = 10, total = 110
+        assert w[0] == pytest.approx(100 / 110)
+        assert w[1] == pytest.approx(10 / 110)
+
+    def test_converges_to_uniform(self):
+        """Very high T should give near-equal weights."""
+        w = temperature_weights([10000, 1], temperature=100.0)
+        assert abs(w[0] - w[1]) < 0.1  # Nearly equal
+
+    def test_sums_to_one(self):
+        w = temperature_weights([500, 200, 80, 30], temperature=2.0)
+        assert sum(w) == pytest.approx(1.0)
+
+    def test_negative_temperature_raises(self):
+        with pytest.raises(ValueError, match="positive"):
+            temperature_weights([100, 50], temperature=-1.0)
+
+    def test_zero_size_raises(self):
+        with pytest.raises(ValueError, match="positive"):
+            temperature_weights([100, 0], temperature=2.0)
+
+    def test_softens_extreme_ratio(self):
+        """A 20:1 ratio should be softened to ~4.5:1 at T=2."""
+        w = temperature_weights([200000, 10000], temperature=2.0)
+        ratio = w[0] / w[1]
+        # sqrt(20) ≈ 4.47
+        assert 4.0 < ratio < 5.0
+
+
+class TestTemperatureScaledMerger:
+    def test_temperature_build(self):
+        """Temperature strategy should auto-compute weights."""
+        big = DataManifest(_make_records("big", 10000))
+        small = DataManifest(_make_records("small", 100))
+        merger = DatasetMerger()
+        merger.add(big)
+        merger.add(small)
+        merged, usage = merger.build(
+            seed=42, total_slices=1000,
+            strategy="temperature", temperature=2.0,
+        )
+        # sqrt(10000)=100, sqrt(100)=10, total=110
+        # big: 100/110 ≈ 0.909 → ~909 slices
+        # small: 10/110 ≈ 0.091 → ~91 slices
+        big_count = sum(1 for r in merged.records if r.dataset == "big")
+        small_count = sum(1 for r in merged.records if r.dataset == "small")
+        assert 850 < big_count < 950
+        assert 50 < small_count < 120
+
+    def test_temperature_ignores_manual_weights(self):
+        """Temperature strategy should ignore the weight= argument to add()."""
+        m1 = DataManifest(_make_records("a", 1000))
+        m2 = DataManifest(_make_records("b", 1000))
+        merger = DatasetMerger()
+        merger.add(m1, weight=99.0)  # This should be ignored
+        merger.add(m2, weight=1.0)   # This should be ignored
+        _, usage = merger.build(
+            seed=42, total_slices=100,
+            strategy="temperature", temperature=1.0,
+        )
+        # Equal sizes → equal weights regardless of manual weights
+        assert usage[0].weight == pytest.approx(0.5)
+        assert usage[1].weight == pytest.approx(0.5)
+
+    def test_unknown_strategy_raises(self):
+        m = DataManifest(_make_records("a", 100))
+        merger = DatasetMerger()
+        merger.add(m)
+        with pytest.raises(ValueError, match="Unknown strategy"):
+            merger.build(strategy="bogus")
+
+    def test_temperature_deterministic(self):
+        """Temperature-scaled builds should be deterministic."""
+        m1 = DataManifest(_make_records("a", 500))
+        m2 = DataManifest(_make_records("b", 100))
+
+        def _build():
+            merger = DatasetMerger()
+            merger.add(m1)
+            merger.add(m2)
+            merged, _ = merger.build(
+                seed=42, total_slices=200,
+                strategy="temperature", temperature=2.0,
+            )
+            return [r.slice_idx for r in merged.records]
+
+        assert _build() == _build()
+
+    def test_three_organ_mixture(self):
+        """Realistic 3-organ scenario: lung(235K) + abdomen(50K) + brain(20K)."""
+        lung = DataManifest(_make_records("lung", 2350))
+        abdomen = DataManifest(_make_records("abdomen", 500))
+        brain = DataManifest(_make_records("brain", 200))
+
+        merger = DatasetMerger()
+        merger.add(lung)
+        merger.add(abdomen)
+        merger.add(brain)
+        merged, usage = merger.build(
+            seed=42, total_slices=1000,
+            strategy="temperature", temperature=2.0,
+        )
+
+        # All three organs should have meaningful representation
+        lung_count = sum(1 for r in merged.records if r.dataset == "lung")
+        abdomen_count = sum(1 for r in merged.records if r.dataset == "abdomen")
+        brain_count = sum(1 for r in merged.records if r.dataset == "brain")
+
+        # Brain should NOT be starved (>5% even though it's only 6.5% of data)
+        assert brain_count > 50  # Significantly more than proportional 65
+        # Lung should NOT dominate (proportional would be ~770)
+        assert lung_count < 700
+        # All three represented
+        assert abdomen_count > 100

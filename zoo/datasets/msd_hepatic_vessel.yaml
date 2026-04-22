@@ -1,0 +1,33 @@
+name: msd-hepatic-vessel
+modality: ct
+organs:
+  - liver
+  - hepatic_vessels
+source_url: http://medicaldecathlon.com/
+license: CC-BY-SA-4.0
+total_slices: 21120
+total_series: 303
+pixel_spacing_range: [0.57, 0.97]
+slice_thickness_range: [0.8, 8.0]
+hu_range: [-1024, 3071]
+annotations:
+  - hepatic_vessel_segmentation
+  - hepatic_tumor_segmentation
+preprocessing:
+  format: png_16bit
+  hu_shift: 32768
+  scale: 10
+  index_csv: _index/index.csv
+citation: >
+  Antonelli M, Reinke A, Bakas S, et al. The Medical Segmentation
+  Decathlon. Nature Communications, 2022;13:4128.
+  https://doi.org/10.1038/s41467-022-30695-9
+notes: >
+  Medical Segmentation Decathlon Task 08 (Hepatic Vessel). 443
+  patients (303 training, 140 test). Dual segmentation targets:
+  hepatic vessels and hepatic tumors. Vascular/tubular structures
+  with complex branching geometry — complementary to colon (MSD-10).
+  Widest slice thickness range in the corpus (0.8–8.0mm, median
+  5.0mm). NIfTI format (.nii.gz). Known quality notes: some vessel
+  annotation gaps (~65% coverage) per Xu et al. (MICCAI 2021) — not
+  an issue for self-supervised pretraining (no labels used).
