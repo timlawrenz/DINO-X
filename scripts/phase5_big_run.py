@@ -178,6 +178,15 @@ class ModelConfig:
 
 # Model configuration presets
 MODEL_CONFIGS = {
+    "vit-tiny": ModelConfig(
+        name="vit-tiny",
+        patch=14,
+        dim=192,
+        depth=12,
+        heads=3,
+        mlp_ratio=4.0,
+        out_dim=4096,
+    ),
     "vit-small": ModelConfig(
         name="vit-small",
         patch=14,
@@ -1223,7 +1232,11 @@ def main() -> None:
     
     # AMP
     ap.add_argument("--amp", action="store_true", help="Use mixed precision training")
-    
+
+    # JSON-lines metrics log (one line per step, for programmatic consumers)
+    ap.add_argument("--log-json", type=Path, default=None,
+                    help="Write one JSON line per training step to this file")
+
     args = ap.parse_args()
     
     # ─────────────────────────────────────────────────────────────────────────
@@ -1631,6 +1644,16 @@ def main() -> None:
         # Logging
         loss_val = loss.item() * args.accumulation_steps
         loss_history.append(loss_val)
+
+        # Per-step JSON-lines log (lightweight, for programmatic consumers)
+        if args.log_json is not None:
+            _jl = json.dumps({
+                "step": step,
+                "loss": round(loss_val, 6),
+                "lr": opt.param_groups[0]["lr"],
+            })
+            with open(args.log_json, "a") as _jf:
+                _jf.write(_jl + "\n")
         
         if time.time() - last_log >= 10.0 or step == start_step:
             elapsed = time.time() - t0
