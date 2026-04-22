@@ -29,7 +29,7 @@ class PreprocessingConfig(BaseModel):
 class DatasetEntry(BaseModel):
     """A single medical imaging dataset in the zoo catalog.
 
-    Stored as individual YAML files in ``zoo/datasets/``.
+    Stored as individual YAML files in ``zoo/datasets/<modality>/``.
     """
 
     name: str

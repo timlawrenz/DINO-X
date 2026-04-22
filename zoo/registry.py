@@ -19,11 +19,13 @@ logger = logging.getLogger(__name__)
 class DatasetRegistry:
     """Catalog of available medical imaging datasets.
 
-    Reads ``DatasetEntry`` records from YAML files in a directory::
+    Reads ``DatasetEntry`` records from YAML files in a directory tree::
 
         registry = DatasetRegistry("zoo/datasets/")
         ct_datasets = registry.query(modality="ct")
         entry = registry.get("lidc-idri")
+
+    Dataset files are organized by modality subfolder (e.g. ``ct/``, ``mri/``).
     """
 
     def __init__(self, catalog_dir: str | Path | None = None) -> None:
@@ -45,7 +47,7 @@ class DatasetRegistry:
             raise FileNotFoundError(f"Catalog directory not found: {catalog_path}")
 
         count = 0
-        for yaml_file in sorted(catalog_path.glob("*.yaml")):
+        for yaml_file in sorted(catalog_path.rglob("*.yaml")):
             try:
                 entry = self._load_entry(yaml_file)
                 self._entries[entry.name] = entry
