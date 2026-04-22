@@ -144,20 +144,56 @@ Every training run tracks full provenance via the `zoo/` package:
 DINO-X is designed for parameter-efficient fine-tuning. Researchers download
 the frozen backbone and train a tiny adapter (~5MB) for their specific task:
 
-- **HF peft integration** for LoRA injection (planned, see [#19](https://github.com/timlawrenz/DINO-X/issues/19))
-- ScaleEmbedding is **always frozen** during adapter training — the adapter
-  learns pathology, not alternate physics
-- Target: `qkv`, `proj`, `fc1`, `fc2` layers in ViT attention blocks
+```python
+from zoo.hub import load_model
+from zoo.peft import apply_lora, save_adapter
+
+# Load pretrained backbone
+model = load_model("timlawrenz/dinox-ct-vit-small-v1")
+
+# Inject LoRA — only adapter weights train (~200K params)
+model = apply_lora(model, rank=8)
+
+# ... train on your labeled data ...
+
+save_adapter(model, "my-pe-adapter/")  # ~0.8 MB
+```
+
+Or use the fine-tuning script directly:
+
+```bash
+python scripts/finetune_lora.py \
+  --backbone timlawrenz/dinox-ct-vit-small-v1 \
+  --train-csv data/train_labels.csv \
+  --val-csv data/val_labels.csv \
+  --task classification --num-classes 5 \
+  --rank 8 --epochs 50 --lr 1e-3 \
+  --output adapters/my-adapter/
+```
+
+Key design decisions:
+- **HF peft integration**: LoRA injection targeting `qkv`, `proj`, `fc1`, `fc2`
+- **ScaleEmbedding always frozen**: Adapters learn pathology, not alternate physics
+- **Head outside PEFT**: Clean save/load — adapter weights via peft, task head separately
 
 ## Repository Structure
 
 ```
+├── configs/
+│   └── panorgan_ct_vits.yaml      # Staged pan-organ CT training spec
 ├── docs/
 │   ├── EXPERIMENTS.md              # Experiment logs with full results
 │   ├── roadmap.md                  # Phase 1–6 execution plan
 │   ├── hardware_setup.md           # ROCm/platform bootstrap
 │   └── data_preprocessing.md       # DICOM → PNG pipeline details
-├── zoo/                            # Data registry & lineage package
+├── zoo/                            # Model zoo package
+│   ├── arch.py                     # PatchViT + ScaleEmbedding architecture
+│   ├── hub.py                      # Model loading (local / HuggingFace Hub)
+│   ├── encode.py                   # Zero-preprocessing inference API
+│   ├── peft.py                     # LoRA adapter inject / save / load
+│   ├── card.py                     # HuggingFace model card generator
+│   ├── publish.py                  # HuggingFace Hub publishing pipeline
+│   ├── data.py                     # Unified CT data loader (Manifest → DataLoader)
 │   ├── models.py                   # Pydantic models (DatasetEntry, SliceMetadata, etc.)
 │   ├── registry.py                 # YAML dataset catalog
 │   ├── manifest.py                 # Parquet per-slice metadata
@@ -168,18 +204,16 @@ the frozen backbone and train a tiny adapter (~5MB) for their specific task:
 │       └── pancreas_ct.yaml
 ├── scripts/
 │   ├── phase5_big_run.py           # Main training script (DINO + Gram + Scale)
-│   ├── phase5_view_retrieval_eval.py # View retrieval evaluation
+│   ├── evaluate_panorgan.py        # 6-metric evaluation suite
+│   ├── finetune_lora.py            # LoRA fine-tuning training script
 │   ├── phase2_preprocess_lidc_idri.py # DICOM → PNG preprocessor
 │   ├── phase2_tcia_download.py     # TCIA dataset downloader
 │   ├── mvp_combine_indices.py      # Multi-dataset index combiner
 │   ├── extract_dicom_spacing.py    # DICOM spacing metadata extractor
 │   ├── fetch_hf_data.sh            # Download processed data from HuggingFace
-│   ├── prep_remote_data.sh         # Cloud data prep pipeline (TCIA → HF)
-│   ├── rocm_env.sh                 # ROCm env helper (bash/zsh)
-│   └── rocm_env.fish               # ROCm env helper (fish)
-├── tests/                          # Zoo package tests (50 tests)
+│   └── prep_remote_data.sh         # Cloud data prep pipeline (TCIA → HF)
+├── tests/                          # 171 tests (zoo, card, publish, data, finetune)
 ├── runs/                           # Experiment artifacts (results, configs)
-│   └── mvp-two-organ/             # Two-organ ablation results
 ├── openspec/                       # Specifications and change proposals
 ├── requirements.in                 # Human-maintained dependencies
 ├── requirements.txt                # Pinned snapshot
@@ -203,10 +237,12 @@ billion-parameter training to enterprise data centers.
 
 | Benchmark | Target | Status |
 |-----------|--------|--------|
-| View retrieval (label-free) | Beat random baseline | ✅ Passed (5.0× on two-organ) |
-| Scale embedding ablation | Loss improvement | ✅ Passed (67× lower loss) |
-| Linear probe AUC | > 0.90 on malignancy | Planned |
+| View retrieval (label-free) | Beat random baseline | ✅ 14× on LIDC, 5× on Pancreas |
+| Scale embedding ablation | Loss improvement | ✅ 67× lower loss |
+| Dataset discrimination | AUC ≥ 0.95 | ✅ AUC = 1.000 |
+| Spacing R² | ≥ 0.80 | ✅ R² = 0.876 |
 | No feature collapse | Embedding σ > 0 | ✅ Verified |
+| Linear probe AUC | > 0.90 on malignancy | Planned (Stage C) |
 | Attention maps | Segment nodules unsupervised | Planned |
 
 ## License & Citation
@@ -215,5 +251,7 @@ billion-parameter training to enterprise data centers.
 - **Base Architecture:** Meta Research / DINOv3 with Gram Anchoring
 - **Data:** LIDC-IDRI and Pancreas-CT from [The Cancer Imaging Archive](https://www.cancerimagingarchive.net/)
 
-> **Status:** Active development. The MVP pipeline (data → train → eval) is
-> proven end-to-end. Pan-organ scaling and HuggingFace model publishing are next.
+> **Status:** Active development. Phases 1–5 infrastructure complete (ScaleEmbedding,
+> data registry, training pipeline, model cards, HF Hub publishing, LoRA fine-tuning).
+> MVP proven with 67× loss improvement on two-organ ablation. Pan-organ scaling
+> (Stage A/B/C) and cross-modality expansion (MRI, X-ray) are next.
