@@ -64,9 +64,9 @@ def _load_split_series_dirs(split_manifest: Path, which: str) -> set[str]:
 
 
 @torch.no_grad()
-def _embed_backbone_cls(student: Any, x: torch.Tensor) -> torch.Tensor:
+def _embed_backbone_cls(student: Any, x: torch.Tensor, spacing: torch.Tensor | None = None) -> torch.Tensor:
     """Return L2-normalized CLS embedding from backbone."""
-    feats = student.backbone(x)  # (B, N+1, D)
+    feats = student.backbone(x, spacing=spacing)  # (B, N+1, D)
     cls = feats[:, 0]
     return F.normalize(cls.float(), p=2, dim=-1)
 
@@ -182,16 +182,19 @@ def main() -> int:
 
         v1_list = []
         v2_list = []
+        sp_list = []
         for j in range(start, end):
-            views, _spacing = ds[idxs[j]]
+            views, spacing = ds[idxs[j]]
             v1_list.append(views[0])
             v2_list.append(views[1])
+            sp_list.append(spacing)
 
         x1 = torch.stack(v1_list, dim=0).to(device, non_blocking=True)
         x2 = torch.stack(v2_list, dim=0).to(device, non_blocking=True)
+        sp = torch.stack(sp_list, dim=0).to(device, non_blocking=True) if args.scale_aware else None
 
-        q = _embed_backbone_cls(student, x1)
-        k = _embed_backbone_cls(student, x2)
+        q = _embed_backbone_cls(student, x1, spacing=sp)
+        k = _embed_backbone_cls(student, x2, spacing=sp)
 
         Q_chunks.append(q.cpu())
         K_chunks.append(k.cpu())
