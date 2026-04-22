@@ -1679,8 +1679,11 @@ def main() -> None:
 
             if args.loss_type == "dino":
                 with torch.no_grad():
-                    t_prob = F.softmax((teacher_out - dino_loss_fn.center) / args.teacher_temp, dim=-1)
-                    s_prob = F.softmax(student_out.detach() / args.student_temp, dim=-1)
+                    # Cast to float32 to avoid fp16 underflow:
+                    # softmax(x/0.1) in fp16 produces exact zeros, then
+                    # 0 * log(0) = 0 * -inf = NaN in IEEE 754.
+                    t_prob = F.softmax((teacher_out.float() - dino_loss_fn.center.float()) / args.teacher_temp, dim=-1)
+                    s_prob = F.softmax(student_out.detach().float() / args.student_temp, dim=-1)
                     t_ent = (-t_prob * torch.log(t_prob.clamp_min(1e-12))).sum(dim=-1).mean().item()
                     s_ent = (-s_prob * torch.log(s_prob.clamp_min(1e-12))).sum(dim=-1).mean().item()
                 tb_writer.add_scalar("Train/Entropy_Teacher", t_ent, step)
