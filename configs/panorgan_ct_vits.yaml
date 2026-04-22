@@ -1,0 +1,229 @@
+# Pan-Organ CT Pretraining — Staged Rollout
+#
+# This spec defines three stages of progressively larger pan-organ CT
+# pretraining, using the proven ViT-Small recipe with scale embeddings.
+#
+# Each stage validates no regression before scaling up. All stages use
+# the unified data loader (zoo.data.ManifestDataset) with Parquet
+# manifests containing per-slice physical spacing metadata.
+#
+# Usage:
+#   python scripts/phase5_big_run.py \
+#     --config configs/panorgan_ct_vits.yaml \
+#     --stage a
+#
+# Or override individual values:
+#   python scripts/phase5_big_run.py \
+#     --config configs/panorgan_ct_vits.yaml \
+#     --stage c --batch-size 128
+
+# ─────────────────────────────────────────────────────────────────────
+# Common training config (shared across all stages)
+# ─────────────────────────────────────────────────────────────────────
+common:
+  # Model
+  architecture: vit-small
+  vit_patch: 14
+  vit_dim: 384
+  vit_depth: 12
+  vit_heads: 6
+  mlp_ratio: 4.0
+  num_registers: 4
+  scale_aware: true
+
+  # Training
+  optimizer: adamw
+  lr: 2.0e-4
+  weight_decay: 0.04
+  warmup_steps: 500
+  center_momentum: 0.999
+  ema_decay: 0.996
+
+  # Loss
+  loss_dino: true
+  loss_gram: 1.0
+  loss_koleo: 0.1
+
+  # Augmentation
+  augmentation: spatial-only  # No intensity augmentation — HU values are calibrated
+  random_window_level: [-400, 400]
+  random_window_width: [800, 2000]
+  crop_scale: [0.5, 1.0]
+
+  # Data
+  img_size: 224
+  input_format: hu16_png
+
+  # Infrastructure
+  checkpoint_interval: 1000
+  log_interval: 100
+  seed: 42
+  amp: true
+
+# ─────────────────────────────────────────────────────────────────────
+# Stage A: Single-dataset validation
+# ─────────────────────────────────────────────────────────────────────
+# Purpose: Validate new manifest-based data loader produces same
+#          training dynamics as existing PngDataset.
+# Success: Loss curve matches previous LIDC-only runs within 5%.
+#          View retrieval ratio ≥ 10× random.
+
+stage_a:
+  name: "panorgan-ct-vits-stage-a"
+  description: "LIDC-IDRI only — validate manifest data loader"
+
+  datasets:
+    - name: lidc-idri
+      manifest: data/manifests/lidc_idri.parquet
+      weight: 1.0
+
+  training:
+    max_steps: 5000
+    batch_size: 64
+    grad_accum_steps: 4
+
+  hardware:
+    gpu: "RTX 4090"
+    estimated_time: "30 min"
+    estimated_cost: "$0.15"
+
+  evaluation:
+    - view_retrieval
+    - embedding_stddev
+    - spacing_r2
+
+  success_criteria:
+    view_retrieval_ratio: ">= 10.0"
+    loss_final: "< 2.0"
+
+# ─────────────────────────────────────────────────────────────────────
+# Stage B: Two-organ validation
+# ─────────────────────────────────────────────────────────────────────
+# Purpose: First multi-organ test. Verify scale embedding distinguishes
+#          different organ/spacing regimes.
+# Success: Per-dataset retrieval preserved. Cross-dataset discrimination.
+#          Spacing counterfactual improvement over baseline.
+
+stage_b:
+  name: "panorgan-ct-vits-stage-b"
+  description: "LIDC-IDRI + CT-ORG — first multi-organ test"
+
+  datasets:
+    - name: lidc-idri
+      manifest: data/manifests/lidc_idri.parquet
+      weight: 0.5
+    - name: ct-org
+      manifest: data/manifests/ct_org.parquet
+      weight: 0.5
+
+  training:
+    max_steps: 20000
+    batch_size: 64
+    grad_accum_steps: 4
+
+  hardware:
+    gpu: "RTX 4090"
+    estimated_time: "2 hours"
+    estimated_cost: "$0.60"
+
+  evaluation:
+    - view_retrieval          # per-dataset
+    - dataset_discrimination  # AUC between datasets
+    - spacing_counterfactual  # spacing sensitivity
+    - spacing_r2              # spacing encoding quality
+    - cross_dataset_centroid  # organ separation
+
+  success_criteria:
+    view_retrieval_ratio: ">= 8.0"
+    dataset_discrimination_auc: ">= 0.95"
+    spacing_r2: ">= 0.80"
+
+# ─────────────────────────────────────────────────────────────────────
+# Stage C: Full pan-organ corpus
+# ─────────────────────────────────────────────────────────────────────
+# Purpose: Train publishable dinox-ct-vit-small on full multi-organ
+#          CT corpus. This is the first model zoo release candidate.
+# Success: Strong view retrieval across all datasets. Linear probe
+#          AUC > 0.85 on LIDC malignancy. Model card generated.
+
+stage_c:
+  name: "panorgan-ct-vits-stage-c"
+  description: "LIDC + CT-ORG + AbdomenCT-1K — full pan-organ corpus"
+
+  datasets:
+    - name: lidc-idri
+      manifest: data/manifests/lidc_idri.parquet
+      weight: 0.35
+    - name: ct-org
+      manifest: data/manifests/ct_org.parquet
+      weight: 0.25
+    - name: abdomenct-1k
+      manifest: data/manifests/abdomenct_1k.parquet
+      weight: 0.40
+
+  training:
+    max_steps: 200000
+    batch_size: 64
+    grad_accum_steps: 4
+
+  hardware:
+    gpu: "RTX 4090"
+    estimated_time: "5 hours"
+    estimated_cost: "$2.50"
+
+  evaluation:
+    - view_retrieval
+    - dataset_discrimination
+    - spacing_counterfactual
+    - spacing_r2
+    - cross_dataset_centroid
+    - linear_probe_malignancy
+
+  success_criteria:
+    view_retrieval_ratio: ">= 8.0"
+    dataset_discrimination_auc: ">= 0.90"
+    spacing_r2: ">= 0.80"
+    linear_probe_auc: ">= 0.85"
+
+  publish:
+    hub_repo: "timlawrenz/dinox-ct-vit-small-v1"
+    license: "CC-BY-NC-3.0"
+    generate_model_card: true
+    export_safetensors: true
+
+# ─────────────────────────────────────────────────────────────────────
+# Fleet orchestration
+# ─────────────────────────────────────────────────────────────────────
+# Stages run sequentially. Each stage validates success criteria
+# before proceeding. A failed stage blocks subsequent stages.
+#
+# Execution:
+#   1. Prepare data manifests (scripts/mvp_prepare_data.py)
+#   2. Upload manifests + data to HuggingFace (scripts/fetch_hf_data.sh)
+#   3. Launch stage A on Vast.ai (or local GPU)
+#   4. Evaluate → verify success criteria
+#   5. Proceed to stage B with stage A checkpoint as resume point
+#   6. Evaluate → verify success criteria
+#   7. Proceed to stage C with stage B checkpoint as resume point
+#   8. Evaluate → publish to HuggingFace Hub
+
+fleet:
+  provider: "vast.ai"
+  image: "pytorch/pytorch:2.7.0-cuda12.8-cudnn9-devel"
+  gpu_filter: "RTX 4090"
+  disk_space: "50 GB"
+
+  setup_commands:
+    - "pip install -r requirements-4090.txt"
+    - "bash scripts/fetch_hf_data.sh"
+
+  # Preflight: 50-step dry run to verify setup
+  preflight:
+    max_steps: 50
+    timeout: "5 min"
+
+  # Results collection
+  results:
+    metrics_format: "json_line"
+    checkpoint_upload: true
+    eval_upload: true
