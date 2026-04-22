@@ -69,7 +69,7 @@ mkdir -p data/raw
 if [ -f data/raw/lidc_mvp_uids.txt ]; then
     echo "skip=true reason=lidc_mvp_uids.txt_exists"
 else
-    python scripts/phase2_tcia_download.py list-series \
+    python scripts/preprocessing/phase2_tcia_download.py list-series \
         --collection "$TCIA_COLLECTION_LIDC" \
         --modality CT \
         --out data/raw/lidc_all_uids.txt
@@ -88,7 +88,7 @@ fi
 # ── Step 3: Download LIDC-IDRI (100 series) ──
 echo ""
 echo "=== Step 3/9: Download LIDC-IDRI ($LIDC_SERIES_COUNT series) ==="
-python scripts/phase2_tcia_download.py download-series \
+python scripts/preprocessing/phase2_tcia_download.py download-series \
     --collection "$TCIA_COLLECTION_LIDC" \
     --uids data/raw/lidc_mvp_uids.txt \
     --out-root data/raw/lidc-idri
@@ -96,7 +96,7 @@ python scripts/phase2_tcia_download.py download-series \
 # ── Step 4: Download Pancreas-CT (all volumes) ──
 echo ""
 echo "=== Step 4/9: Download Pancreas-CT (all volumes) ==="
-python scripts/phase2_tcia_download.py download-collection \
+python scripts/preprocessing/phase2_tcia_download.py download-collection \
     --collection "$TCIA_COLLECTION_PANCREAS" \
     --out-root data/raw/pancreas-ct \
     --out-uids data/raw/pancreas_all_uids.txt
@@ -104,7 +104,7 @@ python scripts/phase2_tcia_download.py download-collection \
 # ── Step 5: Preprocess LIDC-IDRI ──
 echo ""
 echo "=== Step 5/9: Preprocess LIDC-IDRI (DICOM → 16-bit PNG) ==="
-python scripts/phase2_preprocess_lidc_idri.py \
+python scripts/preprocessing/phase2_preprocess_lidc_idri.py \
     --dicom-root data/raw/lidc-idri \
     --out-root data/processed \
     --dataset-name lidc-idri
@@ -114,7 +114,7 @@ echo "lidc_index=$(wc -l < data/processed/_index/lidc_index.csv) lines"
 # ── Step 6: Preprocess Pancreas-CT ──
 echo ""
 echo "=== Step 6/9: Preprocess Pancreas-CT (DICOM → 16-bit PNG) ==="
-python scripts/phase2_preprocess_lidc_idri.py \
+python scripts/preprocessing/phase2_preprocess_lidc_idri.py \
     --dicom-root data/raw/pancreas-ct \
     --out-root data/processed \
     --dataset-name pancreas-ct
@@ -124,7 +124,7 @@ echo "pancreas_index=$(wc -l < data/processed/_index/pancreas_index.csv) lines"
 # ── Step 7: Combine indices ──
 echo ""
 echo "=== Step 7/9: Combine dataset indices ==="
-python scripts/mvp_combine_indices.py \
+python scripts/preprocessing/mvp_combine_indices.py \
     --inputs lidc-idri:data/processed/_index/lidc_index.csv \
     --inputs pancreas-ct:data/processed/_index/pancreas_index.csv \
     --out data/processed/combined-mvp/index.csv

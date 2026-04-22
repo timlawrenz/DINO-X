@@ -30,7 +30,7 @@ Install dependencies into the virtualenv:
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-./setup_rocm_8060s.sh              # Install ROCm PyTorch wheels
+./scripts/setup_rocm_8060s.sh              # Install ROCm PyTorch wheels
 pip install -r requirements.txt
 ```
 
@@ -46,7 +46,7 @@ Dependencies are tracked in:
 python scripts/phase1_validate_attention.py --size 512 --device cuda --dtype fp16
 
 # Phase 2: Validate preprocessed data samples
-python scripts/phase2_validate_samples.py
+python scripts/preprocessing/phase2_validate_samples.py
 
 # View Retrieval Eval (label-free representation check)
 python scripts/phase5_view_retrieval_eval.py --checkpoint path/to/checkpoint.pth
@@ -82,7 +82,7 @@ python scripts/tune_throughput.py --batch-sizes 32,64,128 --num-workers 0,8,16
 ### Data Pipeline (2.5D Volumetric Slices)
 1. **Raw Format**: LIDC-IDRI DICOM volumes converted to 16-bit PNG slices (one file per slice)
    - Stores full Hounsfield Unit (HU) range: [-1000, 4000] offset to uint16
-   - See `scripts/phase2_preprocess_lidc_idri.py`
+   - See `scripts/preprocessing/phase2_preprocess_lidc_idri.py`
 
 2. **Training Loader**: `PngDataset` in training scripts
    - Loads 3 consecutive slices (z-1, z, z+1) and stacks as RGB-like (3, H, W) tensor
@@ -150,34 +150,11 @@ python scripts/tune_throughput.py --batch-sizes 32,64,128 --num-workers 0,8,16
 - **`docs/hardware_setup.md`**: Platform bootstrap (ROCm installation, Flash Attention setup)
 - **`docs/data_preprocessing.md`**: Detailed LIDC-IDRI preprocessing pipeline (DICOM → PNG → tensor)
 - **`docs/EXPERIMENTS.md`**: Experiment logs and hyperparameter tuning results
-- **`openspec/project.md`**: Project conventions, tech stack, constraints
-- **`openspec/AGENTS.md`**: OpenSpec workflow for AI assistants (spec-driven development)
-- **`openspec/changes/`**: Active change proposals (what SHOULD change)
-- **`openspec/specs/`**: Current specifications (what IS built)
+- **`docs/hardware/`**: Hardware info dumps (Strix Halo specs, ROCm info)
 
 ### Creating New Documentation
 - General documentation goes in `docs/`
-- Specifications and change proposals follow OpenSpec structure in `openspec/`
 - **Do not create markdown files for planning, notes, or tracking** outside these locations
-
-## OpenSpec Workflow
-
-This project uses OpenSpec for spec-driven development. When making significant changes:
-
-1. **Check existing specs**: `openspec list` and `openspec list --specs`
-2. **Read project context**: `openspec/project.md` and `openspec/AGENTS.md`
-3. **Create change proposal**: Follow the workflow in `openspec/AGENTS.md`
-   - Use verb-led kebab-case IDs (e.g., `add-phase6-validation`)
-   - Include `proposal.md`, `tasks.md`, and spec deltas
-   - Validate with `openspec validate <change-id> --strict`
-4. **Implement after approval**: Complete tasks in `tasks.md` sequentially
-5. **Archive after deployment**: `openspec archive <change-id> --yes`
-
-### When to Skip OpenSpec
-- Bug fixes (restore intended behavior)
-- Typos, formatting, comments
-- Configuration changes
-- Tests for existing behavior
 
 ## Domain Context
 

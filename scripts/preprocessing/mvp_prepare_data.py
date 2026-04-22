@@ -5,7 +5,7 @@ Creates DataManifest Parquet files from processed index CSVs,
 merges them with weighted sampling, and records full training lineage.
 
 Usage:
-  python scripts/mvp_prepare_data.py \
+  python scripts/preprocessing/mvp_prepare_data.py \
     --lidc-index .../lidc-idri/_index/index_with_spacing.csv \
     --pancreas-index .../pancreas-ct/_index/index.csv \
     --out-dir data/mvp \

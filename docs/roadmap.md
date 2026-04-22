@@ -10,8 +10,6 @@ Before looking at data, we must prove the Strix Halo can actually run the math.
 - [x] **Flash Attention Compilation**: Compile Flash Attention 2 using the Triton backend.
 
 **Implementation links (OpenSpec + docs):**
-- OpenSpec change: `openspec/changes/add-phase1-platform-bootstrap/proposal.md`
-- Tasks checklist: `openspec/changes/add-phase1-platform-bootstrap/tasks.md`
 - Setup guide: `docs/hardware_setup.md`
 - Validation script: `scripts/phase1_validate_attention.py`
 
@@ -27,14 +25,12 @@ Raw medical data is unusable for Vision Transformers. We must transform it.
 - [x] **Write Provenance Manifest**: Record counts/bytes and timestamp for raw + processed data.
 
 **Implementation links (OpenSpec + docs):**
-- OpenSpec change: `openspec/changes/add-phase2-data-fuel/proposal.md`
-- Tasks checklist: `openspec/changes/add-phase2-data-fuel/tasks.md`
 - Data guide: `docs/data_fuel.md`
 - LIDC-IDRI acquisition: `docs/lidc_idri.md`
-- Symlink bootstrap: `scripts/phase2_setup_data_root.sh`
-- Preprocessing script: `scripts/phase2_preprocess_lidc_idri.py`
-- Validation script: `scripts/phase2_validate_samples.py`
-- Dataset manifest helper: `scripts/phase2_write_dataset_manifest.py`
+- Symlink bootstrap: `scripts/preprocessing/phase2_setup_data_root.sh`
+- Preprocessing script: `scripts/preprocessing/phase2_preprocess_lidc_idri.py`
+- Validation script: `scripts/preprocessing/phase2_validate_samples.py`
+- Dataset manifest helper: `scripts/preprocessing/phase2_write_dataset_manifest.py`
 
 **Success Criteria**: Validation previews should clearly show lung texture (not just black/white blobs); the index CSV is generated and Phase 3 can assemble 3-slice inputs (z-1,z,z+1) from the stored HU16 slices; a manifest JSON is generated under `data/processed/_manifests/`.
 
@@ -51,8 +47,6 @@ Do not start the main training yet. We need to prove the code works on a tiny sc
 - [x] **The "Restart" Test**: Interrupt the training (Ctrl+C), load the last checkpoint, and resume. Verify loss continues from where it left off.
 
 **Implementation links (OpenSpec + docs):**
-- OpenSpec change: `openspec/changes/add-phase3-micro-run/proposal.md`
-- Tasks checklist: `openspec/changes/add-phase3-micro-run/tasks.md`
 - Micro-run guide: `docs/phase3_micro_run.md`
 - Training script: `scripts/phase3_micro_run.py`
 
@@ -66,10 +60,8 @@ Flying blind for 15 days is dangerous. We need instruments.
 - [x] **Define Validation Set**: Isolate 10% of the data now so it never leaks into the training set.
 
 **Implementation links (OpenSpec + docs):**
-- OpenSpec change: `openspec/changes/add-phase4-instrumentation-navigation/proposal.md`
-- Tasks checklist: `openspec/changes/add-phase4-instrumentation-navigation/tasks.md`
 - Phase 4 guide: `docs/phase4_instrumentation.md`
-- Split manifest generator: `scripts/phase4_make_split_manifest.py`
+- Split manifest generator: `scripts/preprocessing/phase4_make_split_manifest.py`
 - Training monitor: `scripts/phase4_monitor.py`
 
 ## Phase 4.5: Hyperparameter Grid Search (Throughput Tuning)
@@ -88,8 +80,6 @@ We don't need 120GB of unique files to test throughput; we need to force the Dat
 - [x] **Profile the Bottleneck**: Measure data decode/transform time vs. forward/backward time to classify IO-bound vs compute-bound regimes.
 
 **Implementation links (OpenSpec):**
-- OpenSpec change: `openspec/changes/add-throughput-tuning/proposal.md`
-- Tasks checklist: `openspec/changes/add-throughput-tuning/tasks.md`
 
 **Current tuned decision (Strix Halo)**
 - **Target architecture (Phase 5 Large-first):** ViT-Large (`--vit-patch 14 --vit-dim 1024 --vit-depth 24 --vit-heads 16`)

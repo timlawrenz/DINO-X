@@ -242,7 +242,7 @@ stage_c:
 # before proceeding. A failed stage blocks subsequent stages.
 #
 # Execution:
-#   1. Prepare data manifests (scripts/mvp_prepare_data.py)
+#   1. Prepare data manifests (scripts/preprocessing/mvp_prepare_data.py)
 #   2. Upload manifests + data to HuggingFace (scripts/fetch_hf_data.sh)
 #   3. Launch stage A on Vast.ai (or local GPU)
 #   4. Evaluate → verify success criteria

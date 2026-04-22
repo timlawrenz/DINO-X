@@ -2,7 +2,6 @@
 # Documentation
 
 The README.md contains a general overview of the project.
-Openspec files in the `openspec` directory contain specifications and guidelines for various components of the project.
 General documentation lives in the `docs` directory.
 No other documentation files should be created outside of these locations.
 

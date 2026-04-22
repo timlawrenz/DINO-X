@@ -7,7 +7,7 @@ This document details the exact preprocessing steps used in the DINO-X project, 
 Our goal is to preserve the full dynamic range of the CT scan (Hounsfield Units) while making the data consumable by standard computer vision models (which expect 0-1 or normalized floats).
 
 ### Step 1: Ingestion (DICOM to Raw PNG)
-**Script:** `scripts/phase2_preprocess_lidc_idri.py`
+**Script:** `scripts/preprocessing/phase2_preprocess_lidc_idri.py`
 
 We convert 12-bit DICOM files into 16-bit PNGs to create a "Raw" dataset that is fast to load but semantically lossless.
 

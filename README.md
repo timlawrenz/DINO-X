@@ -206,15 +206,19 @@ Key design decisions:
 │   ├── phase5_big_run.py           # Main training script (DINO + Gram + Scale)
 │   ├── evaluate_panorgan.py        # 6-metric evaluation suite
 │   ├── finetune_lora.py            # LoRA fine-tuning training script
-│   ├── phase2_preprocess_lidc_idri.py # DICOM → PNG preprocessor
-│   ├── phase2_tcia_download.py     # TCIA dataset downloader
-│   ├── mvp_combine_indices.py      # Multi-dataset index combiner
-│   ├── extract_dicom_spacing.py    # DICOM spacing metadata extractor
+│   ├── integration_canary.py       # Automated infrastructure verification
+│   ├── preprocessing/              # Data preprocessing pipelines
+│   │   ├── phase2_preprocess_lidc_idri.py  # DICOM → PNG
+│   │   ├── phase2_preprocess_nifti.py      # NIfTI → PNG
+│   │   ├── phase2_tcia_download.py         # TCIA dataset downloader
+│   │   ├── mvp_combine_indices.py          # Multi-dataset index combiner
+│   │   └── extract_dicom_spacing.py        # DICOM spacing metadata extractor
 │   ├── fetch_hf_data.sh            # Download processed data from HuggingFace
 │   └── prep_remote_data.sh         # Cloud data prep pipeline (TCIA → HF)
-├── tests/                          # 171 tests (zoo, card, publish, data, finetune)
+├── tests/                          # 186 tests (zoo, card, publish, data, finetune)
+├── docs/                           # Architecture docs, experiment logs, hardware setup
+│   └── hardware/                   # Hardware info dumps (Strix Halo, ROCm)
 ├── runs/                           # Experiment artifacts (results, configs)
-├── openspec/                       # Specifications and change proposals
 ├── requirements.in                 # Human-maintained dependencies
 ├── requirements.txt                # Pinned snapshot
 └── README.md
