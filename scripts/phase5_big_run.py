@@ -270,6 +270,12 @@ class TrainingConfig:
     # Scale awareness
     scale_aware: bool = False
     
+    # Anti-memorization
+    crop_scale_min: float = 0.3
+    crop_scale_max: float = 1.0
+    z_stride: int = 1
+    diverse_batches: bool = False
+    
     # Checkpointing
     ckpt_every: int = 100
     ckpt_keep_last: int = 5
@@ -469,6 +475,8 @@ class PngDataset(torch.utils.data.Dataset):
         rw_width_min: float = 800.0,
         rw_width_max: float = 2000.0,
         scale_aware: bool = False,
+        crop_scale_min: float = 0.3,
+        crop_scale_max: float = 1.0,
     ):
         self.rows = rows
         self.img_size = img_size
@@ -479,7 +487,7 @@ class PngDataset(torch.utils.data.Dataset):
         self.scale_aware = scale_aware
 
         self.transform = transforms.Compose([
-            transforms.RandomResizedCrop(img_size, scale=(0.5, 1.0), interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.RandomResizedCrop(img_size, scale=(crop_scale_min, crop_scale_max), interpolation=transforms.InterpolationMode.BICUBIC),
             transforms.RandomHorizontalFlip(),
             transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         ])
@@ -556,6 +564,88 @@ class PngDataset(torch.utils.data.Dataset):
         
         # Fallback if 10 attempts fail (unlikely)
         raise RuntimeError("Failed to load data after 10 attempts")
+
+
+class DiverseBatchSampler(torch.utils.data.Sampler):
+    """Round-robin batch sampler ensuring at most one sample per series per batch.
+
+    Prevents same-series collisions that create trivially easy contrastive pairs.
+    Each epoch sees all samples; they are just rearranged into series-diverse batches.
+    """
+
+    def __init__(self, rows: list, batch_size: int, drop_last: bool = True,
+                 generator: torch.Generator | None = None):
+        self.batch_size = batch_size
+        self.drop_last = drop_last
+        self.generator = generator
+
+        # Group indices by series_dir
+        self._series_indices: dict[str, list[int]] = {}
+        for i, row in enumerate(rows):
+            self._series_indices.setdefault(row.series_dir, []).append(i)
+
+        self._total = len(rows)
+
+    def __len__(self) -> int:
+        if self.drop_last:
+            return self._total // self.batch_size
+        return (self._total + self.batch_size - 1) // self.batch_size
+
+    def __iter__(self):
+        # Shuffle indices within each series
+        queues: dict[str, list[int]] = {}
+        for series, indices in self._series_indices.items():
+            perm = torch.randperm(len(indices), generator=self.generator).tolist()
+            queues[series] = [indices[i] for i in perm]
+
+        # Build batches: pick one sample from each series, round-robin
+        active_series = list(queues.keys())
+        # Shuffle series order
+        perm = torch.randperm(len(active_series), generator=self.generator).tolist()
+        active_series = [active_series[i] for i in perm]
+
+        batch: list[int] = []
+        series_in_batch: set[str] = set()
+        deferred: list[tuple[str, int]] = []
+
+        si = 0
+        while active_series or deferred:
+            # Try to fill batch from active series
+            if si < len(active_series):
+                series = active_series[si]
+                si += 1
+                if series not in series_in_batch and queues[series]:
+                    batch.append(queues[series].pop())
+                    series_in_batch.add(series)
+                    if not queues[series]:
+                        pass  # series exhausted, will be removed
+                    else:
+                        deferred.append((series, -1))  # re-enqueue
+                elif series in series_in_batch and queues[series]:
+                    deferred.append((series, -1))  # skip for now
+            else:
+                # Batch boundary or end of active list
+                if len(batch) >= self.batch_size:
+                    yield batch
+                    batch = []
+                    series_in_batch = set()
+
+                # Refill active series from deferred
+                active_series = [s for s, _ in deferred if queues.get(s)]
+                perm = torch.randperm(len(active_series), generator=self.generator).tolist()
+                active_series = [active_series[i] for i in perm]
+                deferred = []
+                si = 0
+
+                if not active_series:
+                    break
+
+        # Final partial batch
+        if batch:
+            if not self.drop_last:
+                yield batch
+            elif len(batch) == self.batch_size:
+                yield batch
 
 
 def dino_collate(
@@ -1222,6 +1312,15 @@ def main() -> None:
     # Data
     ap.add_argument("--index-csv", type=Path, default=Path("data/processed/_index/index.csv"))
     ap.add_argument("--split-manifest", type=Path, help="Split manifest JSON (excludes val set)")
+    ap.add_argument("--crop-scale-min", type=float, default=0.3,
+                    help="Min scale for RandomResizedCrop (default: 0.3)")
+    ap.add_argument("--crop-scale-max", type=float, default=1.0,
+                    help="Max scale for RandomResizedCrop (default: 1.0)")
+    ap.add_argument("--z-stride", type=int, default=1,
+                    help="Keep every Nth slice per series to reduce z-axis correlation "
+                         "(default: 1 = all slices, 3 = removes adjacent channel overlap)")
+    ap.add_argument("--diverse-batches", action="store_true",
+                    help="Use series-diverse batch sampling (at most one sample per series per batch)")
     
     # Reproducibility
     ap.add_argument("--train-seed", type=int, default=0)
@@ -1329,6 +1428,10 @@ def main() -> None:
         gram_weight=args.gram_weight,
         koleo_weight=args.koleo_weight,
         scale_aware=args.scale_aware,
+        crop_scale_min=args.crop_scale_min,
+        crop_scale_max=args.crop_scale_max,
+        z_stride=args.z_stride,
+        diverse_batches=args.diverse_batches,
         ckpt_every=args.ckpt_every,
         ckpt_keep_last=args.ckpt_keep_last,
         monitor_every=args.monitor_every,
@@ -1406,6 +1509,19 @@ def main() -> None:
         all_rows = [r for r in all_rows if str(r.series_dir) not in val_set]
         print(f"excluded_val_series={len(val_series)} excluded_rows={before - len(all_rows)}")
     
+    # Z-stride: subsample slices to reduce z-axis correlation
+    if args.z_stride > 1:
+        from collections import defaultdict
+        series_rows: dict[str, list] = defaultdict(list)
+        for r in all_rows:
+            series_rows[r.series_dir].append(r)
+        strided = []
+        for s_dir in sorted(series_rows):
+            rows_sorted = sorted(series_rows[s_dir], key=lambda r: r.slice_index)
+            strided.extend(rows_sorted[::args.z_stride])
+        print(f"z_stride={args.z_stride} rows_before={len(all_rows)} rows_after={len(strided)}")
+        all_rows = strided
+
     def _worker_init_fn(worker_id: int) -> None:
         _seed_all(args.train_seed + worker_id)
     
@@ -1420,6 +1536,8 @@ def main() -> None:
         rw_width_min=training_cfg.rw_width_min,
         rw_width_max=training_cfg.rw_width_max,
         scale_aware=args.scale_aware,
+        crop_scale_min=args.crop_scale_min,
+        crop_scale_max=args.crop_scale_max,
     )
     
     if len(ds) < args.batch_size:
@@ -1428,17 +1546,31 @@ def main() -> None:
         args.batch_size = len(ds)
         training_cfg.batch_size = args.batch_size
 
-    dl = torch.utils.data.DataLoader(
-        ds,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=hw_cfg.num_workers,
-        pin_memory=hw_cfg.pin_memory,
-        drop_last=True,
-        generator=gen,
-        worker_init_fn=_worker_init_fn,
-        collate_fn=dino_collate,
-    )
+    if args.diverse_batches:
+        batch_sampler = DiverseBatchSampler(
+            all_rows, batch_size=args.batch_size, drop_last=True, generator=gen,
+        )
+        dl = torch.utils.data.DataLoader(
+            ds,
+            batch_sampler=batch_sampler,
+            num_workers=hw_cfg.num_workers,
+            pin_memory=hw_cfg.pin_memory,
+            worker_init_fn=_worker_init_fn,
+            collate_fn=dino_collate,
+        )
+        print(f"diverse_batches=True batches_per_epoch={len(batch_sampler)}")
+    else:
+        dl = torch.utils.data.DataLoader(
+            ds,
+            batch_size=args.batch_size,
+            shuffle=True,
+            num_workers=hw_cfg.num_workers,
+            pin_memory=hw_cfg.pin_memory,
+            drop_last=True,
+            generator=gen,
+            worker_init_fn=_worker_init_fn,
+            collate_fn=dino_collate,
+        )
     it = iter(dl)
     
     # ─────────────────────────────────────────────────────────────────────────
