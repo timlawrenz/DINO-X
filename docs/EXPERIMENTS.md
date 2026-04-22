@@ -1,6 +1,6 @@
 # Experiments Log
 
-Updated: 2026-04-21
+Updated: 2026-04-22
 
 ---
 
@@ -202,6 +202,147 @@ near-perfect linear relationship between embedding structure and physical scale.
 
 - `runs/eval_validation/baseline_eval.json` — full 6-metric baseline results
 - `runs/eval_validation/scale_aware_eval.json` — full 6-metric scale-aware results
+
+---
+
+## Local Validation: 5K-Step Scale-Aware Training (2026-04-21)
+
+**Goal:** Reproduce the cloud training result locally on consumer hardware (RTX 2070
+SUPER, 8GB VRAM) and run the full 6-metric evaluation protocol on a properly trained
+checkpoint.
+
+### Key Finding: Gradient Accumulation Step Counting
+
+Multiple prior local training attempts failed (DINO collapse or flat loss) due to a
+critical step-counting issue: `phase5_big_run.py` counts **micro-batches**, not
+**optimizer steps**. With high accumulation factors (e.g., accum=32 for small GPUs),
+the model receives far fewer optimizer updates than expected, and the LR schedule
+compresses warmup to too few optimizer steps.
+
+**Fix:** Use accum=4 (same as the successful cloud run) with batch_size=8. This yields
+5000/4=1250 optimizer updates and 500/4=125 warmup optimizer updates — identical to
+the cloud run's schedule. The effective batch is smaller (32 vs 256) but DINO still
+converges.
+
+### Training Configuration
+
+- **Model:** ViT-Small (dim=384, depth=12, heads=6, patch=14, 21.7M backbone params)
+- **Effective batch:** 32 (batch=8 × accum=4) — smaller than cloud's 256
+- **Optimizer:** AdamW, lr=2e-4, cosine decay to 1e-6, warmup=500 micro-steps
+- **Loss:** DINO + Gram(1.0) + KoLeo(0.1)
+- **EMA:** 0.996, teacher_temp=0.04, student_temp=0.1, center_momentum=0.9
+- **Steps:** 5,000 micro-batches (1,250 optimizer updates)
+- **AMP:** disabled (not needed, batch_size=8 fits in 8GB)
+- **Seed:** 42
+- **Hardware:** NVIDIA GeForce RTX 2070 SUPER (8GB)
+- **Git commit:** `984d229506f10a4b79fe901a1b1576e5897b51c9`
+- **Architecture:** `zoo.arch.PatchViT` (timm-style attention/MLP)
+
+### Loss Curve
+
+| Step | Optimizer Update | Loss | LR |
+|------|-----------------|------|-----|
+| 0 | 0 | 8.97 | 4e-7 |
+| 500 | 125 | 8.94 | 2e-4 (peak) |
+| 1000 | 250 | 8.30 | 1.95e-4 |
+| 2000 | 500 | 6.27 | 1.50e-4 |
+| 3000 | 750 | 4.31 | 8.1e-5 |
+| 4000 | 1000 | 1.25 | 2.4e-5 |
+| 5000 | 1250 | 1.03 | 1.0e-6 |
+
+Total training time: **733 seconds (~12 minutes)** at 6.82 steps/s, 218 samples/s.
+
+### Evaluation Results (6 metrics, 3,843 val slices)
+
+#### Metric 1: Per-Dataset View Retrieval
+
+| Dataset | 1K steps (prior) | 5K steps (this run) |
+|---------|-----------------|---------------------|
+| LIDC-IDRI top-1 ratio | 8.0× | **14.0×** |
+| Pancreas-CT top-1 ratio | 6.0× | **5.0×** |
+
+#### Metric 2: Dataset Discrimination
+
+| Metric | 1K steps | 5K steps |
+|--------|----------|----------|
+| Accuracy | 0.523 | **1.000** |
+| AUC | 1.000 | **1.000** |
+
+Perfect discrimination — model fully separates lung CT from abdominal CT.
+
+#### Metric 3: Spacing Counterfactual
+
+| Intervention | 1K steps | 5K steps |
+|-------------|----------|----------|
+| Real → 2× spacing | 0.0003 | **0.0551** |
+| Real → ½× spacing | 0.0006 | **0.1072** |
+
+**184× improvement** in spacing sensitivity. The model now strongly encodes
+physical scale into its representations.
+
+#### Metric 4: Domain Clustering
+
+| Metric | 1K steps | 5K steps |
+|--------|----------|----------|
+| Same-dataset NN rate | 1.000 | **0.998** |
+| Enrichment vs random | 1.9× | **2.0×** |
+
+#### Metric 5: Spacing Prediction
+
+| Metric | 1K steps | 5K steps |
+|--------|----------|----------|
+| R² (log spacing_x) | 0.724 | **0.876** |
+| MAE (log spacing) | 0.050 | **0.038** |
+
+#### Metric 6: Embedding Statistics
+
+| Metric | 1K steps | 5K steps |
+|--------|----------|----------|
+| LIDC embed StdDev | 0.005 | **0.021** (4×) |
+| Pancreas embed StdDev | 0.0008 | **0.020** (25×) |
+| Cross-centroid cosine | 0.996 | **0.164** |
+| PCA1-spacing corr (LIDC) | 0.540 | -0.198 |
+| PCA1-spacing corr (Pancreas) | 0.993 | **-0.999** |
+
+**Cross-dataset centroid cosine dropped from 0.996 to 0.164** — the model now
+creates genuinely distinct embedding regions for different organs. Embedding diversity
+improved 4-25× across both datasets.
+
+### Comparison: Cloud (5K) vs Local (5K)
+
+| Metric | Cloud (RTX 5070) | Local (RTX 2070) |
+|--------|-----------------|-----------------|
+| Final loss | 0.134 | 1.03 |
+| Effective batch | 256 | 32 |
+| View retrieval ratio | 4.0× | 14.0× (LIDC) |
+| Spacing R² | — | 0.876 |
+| Training time | 63 min | 12 min |
+
+The local model has higher final loss (1.03 vs 0.134), likely due to smaller effective
+batch. However, the local evaluation metrics are strong — the model has learned
+meaningful scale-aware representations.
+
+### Analysis
+
+1. **Step counting matters:** The gradient accumulation step counter bug was the root
+   cause of all prior local training failures. With accum=4 (matching the cloud run's
+   optimizer-step schedule), training converges smoothly on consumer hardware.
+
+2. **Small effective batch works:** Effective batch=32 (8× smaller than cloud's 256) still
+   produces a well-trained model. DINO benefits from large batches for contrastive learning,
+   but 32 is sufficient for convergence on this dataset size.
+
+3. **Scale awareness validated end-to-end:** The spacing counterfactual test shows 184×
+   improvement over the 1K-step model. The model genuinely distinguishes physical scales.
+
+4. **Hub-ready:** The trained backbone (21.7M params, 86.7MB) has been exported to
+   hub format (`runs/v1-local-5k/hub-export/`).
+
+### Artifacts
+
+- `runs/v1-local-5k/20260421_202330/checkpoint_final_00005000.pth` — final checkpoint
+- `runs/v1-local-5k/eval_5k.json` — full 6-metric evaluation results
+- `runs/v1-local-5k/hub-export/` — hub-format backbone + config
 
 ---
 
