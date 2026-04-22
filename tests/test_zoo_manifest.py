@@ -205,13 +205,18 @@ class TestDatasetMerger:
         with pytest.raises(ValueError, match="positive"):
             merger.add(m, weight=-1.0)
 
-    def test_capped_by_available(self):
-        """If we request more slices than available, use all."""
+    def test_oversamples_with_replacement(self):
+        """If we request more slices than available, oversample with replacement."""
         m = DataManifest(_make_records("tiny", 10))
         merger = DatasetMerger()
         merger.add(m, weight=1.0)
-        merged, _usage = merger.build(seed=42, total_slices=1000)
-        assert len(merged) == 10
+        merged, usage = merger.build(seed=42, total_slices=1000)
+        assert len(merged) == 1000
+        # Every original slice should appear (full copies included)
+        original_indices = {r.slice_idx for r in m.records}
+        merged_indices = {r.slice_idx for r in merged.records}
+        assert original_indices == merged_indices
+        assert usage[0].slices_used == 1000
 
 
 # ---------------------------------------------------------------------------
@@ -346,3 +351,58 @@ class TestTemperatureScaledMerger:
         assert lung_count < 700
         # All three represented
         assert abdomen_count > 100
+
+    def test_oversampling_preserves_distribution(self):
+        """When total_slices >> sum of physical datasets, oversampling must
+        maintain the temperature-scaled ratio, not revert to proportional."""
+        big = DataManifest(_make_records("lung", 1000))
+        small = DataManifest(_make_records("brain", 50))
+
+        merger = DatasetMerger()
+        merger.add(big)
+        merger.add(small)
+        merged, usage = merger.build(
+            seed=42, total_slices=10000,
+            strategy="temperature", temperature=2.0,
+        )
+
+        # Total MUST equal requested total (not capped at 1050)
+        assert len(merged) == 10000
+
+        lung_count = sum(1 for r in merged.records if r.dataset == "lung")
+        brain_count = sum(1 for r in merged.records if r.dataset == "brain")
+
+        # sqrt(1000)≈31.6, sqrt(50)≈7.07, total≈38.7
+        # lung: 31.6/38.7≈0.817 → ~8170 slices
+        # brain: 7.07/38.7≈0.183 → ~1830 slices
+        assert 7500 < lung_count < 8800
+        assert 1200 < brain_count < 2500
+
+        # Brain (50 physical) must have been oversampled ~36×
+        assert brain_count > 50  # Must exceed physical size
+
+    def test_oversampled_records_are_valid(self):
+        """Oversampled records must reference real slices from the source."""
+        m = DataManifest(_make_records("ds", 10))
+        merger = DatasetMerger()
+        merger.add(m, weight=1.0)
+        merged, _ = merger.build(seed=42, total_slices=100)
+
+        original_indices = {r.slice_idx for r in m.records}
+        for r in merged.records:
+            assert r.slice_idx in original_indices
+            assert r.dataset == "ds"
+
+    def test_total_slices_exact(self):
+        """Merged manifest must have exactly total_slices records,
+        even when individual datasets need oversampling."""
+        m1 = DataManifest(_make_records("a", 30))
+        m2 = DataManifest(_make_records("b", 7))
+        merger = DatasetMerger()
+        merger.add(m1)
+        merger.add(m2)
+        merged, _ = merger.build(
+            seed=42, total_slices=5000,
+            strategy="temperature", temperature=2.0,
+        )
+        assert len(merged) == 5000

@@ -156,15 +156,50 @@ class DatasetMerger:
         merged_records: list[SliceMetadata] = []
         usage_records: list[DatasetUsage] = []
 
-        for manifest, weight in norm_weights:
-            if total_slices is not None:
-                # Sample a proportional number of slices
-                n_target = max(1, int(total_slices * weight))
-                n_actual = min(n_target, len(manifest))
-                if n_actual < len(manifest):
-                    selected = rng.sample(manifest.records, n_actual)
+        # Pre-compute per-dataset target counts to avoid int() rounding
+        # shortfall.  Distribute leftover slices largest-weight-first.
+        if total_slices is not None:
+            raw_targets = [max(1, int(total_slices * w))
+                           for _, w in norm_weights]
+            shortfall = total_slices - sum(raw_targets)
+            # Distribute leftover 1-per-dataset, largest weight first
+            order = sorted(range(len(norm_weights)),
+                           key=lambda i: norm_weights[i][1], reverse=True)
+            for i in order:
+                if shortfall <= 0:
+                    break
+                raw_targets[i] += 1
+                shortfall -= 1
+            targets = raw_targets
+        else:
+            targets = [None] * len(norm_weights)
+
+        for idx, (manifest, weight) in enumerate(norm_weights):
+            n_target = targets[idx]
+            if n_target is not None:
+                n_available = len(manifest)
+
+                if n_target <= n_available:
+                    # Subsample without replacement
+                    selected = rng.sample(manifest.records, n_target)
                 else:
-                    selected = list(manifest.records)
+                    # Oversample with replacement: include all originals
+                    # once, then fill the remainder by random draws.
+                    # This ensures every slice appears at least once and
+                    # the total count matches the temperature-scaled quota.
+                    full_copies, remainder = divmod(n_target, n_available)
+                    selected = list(manifest.records) * full_copies
+                    if remainder:
+                        selected += rng.sample(manifest.records, remainder)
+                    logger.info(
+                        "Oversampling %s: %d target from %d physical "
+                        "(%.1f× repetition)",
+                        manifest.datasets()[0] if manifest.datasets()
+                        else "unknown",
+                        n_target,
+                        n_available,
+                        n_target / n_available,
+                    )
             else:
                 # Include all slices
                 selected = list(manifest.records)
