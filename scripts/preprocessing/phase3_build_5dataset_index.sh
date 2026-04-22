@@ -3,10 +3,7 @@
 #
 # Prerequisites:
 #   1. CQ500 downloaded and preprocessed:
-#      python scripts/preprocessing/phase2_preprocess_lidc_idri.py \
-#        --dicom-root data/raw/cq500 \
-#        --out-root data/processed \
-#        --dataset-name cq500
+#      bash scripts/preprocessing/download_cq500.sh
 #
 #   2. Per-dataset index CSVs with spacing columns exist at:
 #      - LIDC:    on NAS at lidc-idri/processed-hu16/_index/index_with_spacing.csv

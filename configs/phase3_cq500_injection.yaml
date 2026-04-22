@@ -19,11 +19,8 @@
 #   - View retrieval should climb past ablation's 7.0× ceiling
 #
 # Usage:
-#   # Step 1: Preprocess CQ500 DICOM → PNG
-#   python scripts/preprocessing/phase2_preprocess_lidc_idri.py \
-#     --dicom-root data/raw/cq500 \
-#     --out-root data/processed \
-#     --dataset-name cq500
+#   # Step 1: Download and preprocess CQ500
+#   bash scripts/preprocessing/download_cq500.sh
 #
 #   # Step 2: Combine 5-dataset index
 #   python scripts/preprocessing/mvp_combine_indices.py \
