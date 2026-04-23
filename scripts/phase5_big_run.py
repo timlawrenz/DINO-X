@@ -68,10 +68,14 @@ try:
     import torch
     import torch.nn as nn
     import torch.nn.functional as F
-    from torch.utils.tensorboard import SummaryWriter
     from torchvision import transforms
+except Exception as e:
+    _need(f"torch ({e})")
+
+try:
+    from torch.utils.tensorboard import SummaryWriter
 except Exception:
-    _need("torch")
+    SummaryWriter = None  # tensorboard is optional
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1645,8 +1649,11 @@ def main() -> None:
             warnings.warn(f"Model config mismatch: checkpoint={loaded_cfg.model.name} requested={model_cfg.name}")
     
     # TensorBoard Logger
-    tb_writer = SummaryWriter(log_dir=str(run_dir))
-    print(f"tensorboard_log_dir={run_dir}")
+    tb_writer = SummaryWriter(log_dir=str(run_dir)) if SummaryWriter is not None else None
+    if tb_writer:
+        print(f"tensorboard_log_dir={run_dir}")
+    else:
+        print("tensorboard not installed, skipping TB logging")
 
     # ─────────────────────────────────────────────────────────────────────────
     # 6. Training Loop
@@ -1815,14 +1822,15 @@ def main() -> None:
             )
             
             # TensorBoard Scalars
-            tb_writer.add_scalar("Train/Loss_Total", loss_val, step)
-            tb_writer.add_scalar("Train/Loss_DINO", float(loss_dino.item()), step)
-            tb_writer.add_scalar("Train/Loss_SimCLR", float(loss_simclr.item()), step)
-            tb_writer.add_scalar("Train/Loss_MAE", float(loss_mae.item()), step)
-            tb_writer.add_scalar("Train/Loss_Gram", float(loss_gram.item()), step)
-            tb_writer.add_scalar("Train/Loss_KoLeo", float(loss_koleo.item()), step)
-            if total_norm > 0:
-                tb_writer.add_scalar("Train/Grad_Norm", float(total_norm), step)
+            if tb_writer:
+                tb_writer.add_scalar("Train/Loss_Total", loss_val, step)
+                tb_writer.add_scalar("Train/Loss_DINO", float(loss_dino.item()), step)
+                tb_writer.add_scalar("Train/Loss_SimCLR", float(loss_simclr.item()), step)
+                tb_writer.add_scalar("Train/Loss_MAE", float(loss_mae.item()), step)
+                tb_writer.add_scalar("Train/Loss_Gram", float(loss_gram.item()), step)
+                tb_writer.add_scalar("Train/Loss_KoLeo", float(loss_koleo.item()), step)
+                if total_norm > 0:
+                    tb_writer.add_scalar("Train/Grad_Norm", float(total_norm), step)
 
             if args.loss_type == "dino":
                 with torch.no_grad():
@@ -1832,12 +1840,14 @@ def main() -> None:
                     s_logits = student_out.detach().float() / args.student_temp
                     t_ent = -(F.softmax(t_logits, dim=-1) * F.log_softmax(t_logits, dim=-1)).sum(dim=-1).mean().item()
                     s_ent = -(F.softmax(s_logits, dim=-1) * F.log_softmax(s_logits, dim=-1)).sum(dim=-1).mean().item()
-                tb_writer.add_scalar("Train/Entropy_Teacher", t_ent, step)
-                tb_writer.add_scalar("Train/Entropy_Student", s_ent, step)
+                if tb_writer:
+                    tb_writer.add_scalar("Train/Entropy_Teacher", t_ent, step)
+                    tb_writer.add_scalar("Train/Entropy_Student", s_ent, step)
 
-            tb_writer.add_scalar("Train/LR", current_lr, step)
-            tb_writer.add_scalar("Perf/Samples_Per_Sec", samples_per_sec, step)
-            tb_writer.flush()
+            if tb_writer:
+                tb_writer.add_scalar("Train/LR", current_lr, step)
+                tb_writer.add_scalar("Perf/Samples_Per_Sec", samples_per_sec, step)
+                tb_writer.flush()
 
             last_log = time.time()
         
@@ -1874,20 +1884,18 @@ def main() -> None:
         # Monitoring
         if args.monitor_every and (step + 1) % args.monitor_every == 0:
             if args.loss_type == "mae":
-                # For MAE, visualize reconstruction
-                # pred: (B, L, 3*p*p), mask: (B, L)
-                # We need to unpatchify to see the image
-                # This is complex to do perfectly in 10 lines, so let's skip for now
-                # or just log input slice
                 input_slice = batch[0, 1, :, :].detach().cpu().numpy()
-                tb_writer.add_image("Monitor/Input", input_slice, step, dataformats="HW")
+                if tb_writer:
+                    tb_writer.add_image("Monitor/Input", input_slice, step, dataformats="HW")
             else:
                 heatmap = make_attention_heatmap(student, batch)
-                tb_writer.add_image("Monitor/Attention", heatmap, step, dataformats="HW")
+                if tb_writer:
+                    tb_writer.add_image("Monitor/Attention", heatmap, step, dataformats="HW")
             
                 # Log input slice (first channel of first image in batch)
                 input_slice = batch[0, 1, :, :].detach().cpu().numpy() # Middle slice
-                tb_writer.add_image("Monitor/Input", input_slice, step, dataformats="HW")
+                if tb_writer:
+                    tb_writer.add_image("Monitor/Input", input_slice, step, dataformats="HW")
 
                 # Create Combined Image (Side-by-Side)
                 try:
@@ -1896,9 +1904,6 @@ def main() -> None:
                     input_uint8 = (np.clip(input_slice, 0, 1) * 255).astype(np.uint8)
                     input_pil = Image.fromarray(input_uint8, mode='L').convert('RGB')
 
-                    # Resize heatmap (float 0-1) to match input size and apply colormap simulation (red)
-                    # We'll just keep it grayscale for simplicity or simple red overlay if we wanted, 
-                    # but for side-by-side grayscale is clearest.
                     heatmap_uint8 = (np.clip(heatmap, 0, 1) * 255).astype(np.uint8)
                     heatmap_pil = Image.fromarray(heatmap_uint8, mode='L').resize((img_w, img_h), resample=Image.Resampling.NEAREST).convert('RGB')
 
@@ -1907,11 +1912,9 @@ def main() -> None:
                     combined.paste(input_pil, (0, 0))
                     combined.paste(heatmap_pil, (img_w, 0))
 
-                    # Convert back to CHW for TensorBoard (or HWC if using dataformats='HWC')
-                    # tb_writer.add_image expects CHW by default or HW.
-                    # Let's use HWC string for HWC array.
                     combined_np = np.array(combined)
-                    tb_writer.add_image("Monitor/Combined", combined_np, step, dataformats="HWC")
+                    if tb_writer:
+                        tb_writer.add_image("Monitor/Combined", combined_np, step, dataformats="HWC")
 
                 except Exception as e:
                     print(f"⚠️  Monitoring visualization error: {e}")
@@ -1959,7 +1962,8 @@ def main() -> None:
                         print(f" [Monitor] Output Gram: mean={g_mean:.4f} (If 1, Attention collapsed)")
 
                     gram_img = make_gram_heatmap(student, batch)
-                    tb_writer.add_image("Monitor/Gram", gram_img, step, dataformats="HW")
+                    if tb_writer:
+                        tb_writer.add_image("Monitor/Gram", gram_img, step, dataformats="HW")
                 except Exception as e:
                     print(f"⚠️  Gram visualization error: {e}")
     
@@ -1967,7 +1971,8 @@ def main() -> None:
     # 7. Final Checkpoint
     # ─────────────────────────────────────────────────────────────────────────
     
-    tb_writer.close()
+    if tb_writer:
+        tb_writer.close()
     
     final_step = step + 1
     final_path = run_dir / f"checkpoint_final_{final_step:08d}.pth"
