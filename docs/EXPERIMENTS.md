@@ -1,6 +1,233 @@
 # Experiments Log
 
-Updated: 2026-04-22
+Updated: 2026-04-23
+
+---
+
+## LoRA Benchmark: 5-Dataset Backbone vs 4-Dataset (2026-04-23)
+
+**Goal:** Determine whether adding CQ500 brain CTs (5-dataset) improves or degrades
+downstream task performance vs the 4-dataset lung-focused backbone, measured by LoRA
+fine-tuning on LIDC-IDRI nodule malignancy classification.
+
+### Backbones Under Test
+
+| Backbone | Datasets | Steps | Eff Batch | View Retrieval (final) | Hardware |
+|----------|----------|-------|-----------|----------------------|----------|
+| 4-dataset ablation | LIDC, Pancreas, MSD-Hepatic, MSD-Colon | 5K | 128 | 7.0× | RTX 2070 SUPER |
+| 5-dataset phase3 | + CQ500 (brain CT) | 50K | 128 | 56.0× | Radeon 8060S (Strix Halo) |
+
+5-dataset training: `runs/20260422_202622_5dataset-phase3-small` on Strix Halo.
+400K slices, ViT-Small, bfloat16, KoLeo=0.1, crop_min=0.3, z_stride=3.
+
+### View Retrieval Trajectory (5-Dataset)
+
+| Step | Ratio | Note |
+|------|-------|------|
+| 7,500 | 64.0× | Post-warmup peak |
+| 10,000 | 63.0× | Stable |
+| 25,000 | 52.0× | Mid-training dip (cosine decay) |
+| 50,000 | 56.0× | Recovery, final checkpoint |
+
+Note: Steps 2,500 and 5,000 showed ratio=2.0× due to a bug in the eval script
+(spacing not passed to backbone). Fixed in commit `b6ce59d`.
+
+### LoRA Fine-Tuning Configuration
+
+- **Task:** LIDC-IDRI nodule malignancy (binary: benign vs malignant, threshold=3)
+- **Adapter:** LoRA rank=8, alpha=16, targets=qkv+proj+fc1+fc2
+- **Data:** 1,300 train / 262 val / 315 test nodules (64px crops, lung HU window)
+- **Window:** level=-30, width=120 (scaled HU; real: level=-300, width=1200)
+- **Training:** 50 epochs, early stopping on val AUROC (patience=10)
+- **Frozen:** ScaleEmbedding, PatchEmbed, positional embeddings, registers
+
+### Results: Checkpoint Sweep (LR=5e-4)
+
+| Backbone | Step | Val AUROC | Val Accuracy | Best Epoch |
+|----------|------|-----------|-------------|------------|
+| **4-dataset (Model A)** | **5K** | **0.710** | **0.660** | **24** |
+| 5-dataset | 10K | 0.672 | 0.595 | 23 |
+| 5-dataset | 25K | 0.639 | 0.584 | 10 |
+| 5-dataset | 50K | 0.635 | 0.580 | 10 |
+
+### Results: LR Sweep (5-Dataset, Step 50K)
+
+| LR | Val AUROC | Best Epoch |
+|----|-----------|------------|
+| 1e-3 | 0.680 | 18 |
+| 5e-4 | 0.635 | 10 |
+| 2e-4 | 0.668 | 7 |
+| 1e-4 | 0.619 | 18 |
+
+### Analysis
+
+1. **Capacity dilution confirmed:** The 5-dataset backbone has dramatically better
+   general-purpose representations (56× view retrieval vs 7×) but worse lung-specific
+   downstream performance (best 0.680 vs 0.710 AUROC). Adding brain CTs forced the
+   ViT-Small to spread its 22M parameters across more domains.
+
+2. **More training steps hurt lung-specific features:** Within the 5-dataset run,
+   the 10K checkpoint (0.672) outperformed 25K (0.639) and 50K (0.635) at the default
+   LR. The model continued improving its general representations while degrading
+   organ-specific features.
+
+3. **LR matters but doesn't close the gap:** The best LR for the 50K checkpoint
+   (1e-3 → 0.680) is higher than the 4-dataset optimal (5e-4), suggesting the
+   5-dataset features require more aggressive adaptation. But even the best LR
+   leaves a 3% gap.
+
+4. **Effective batch size was 128, not 256:** Original DINO paper recommends ≥256.
+   With batch=32 and accum=4, teacher centering and KoLeo only see 32 samples per
+   micro-batch. This may limit multi-domain learning. A batch-size-doubled run
+   (eff=256) is the next experiment.
+
+### Artifacts
+
+- `adapters/lidc-malignancy-lora-r8-64px-lung-window/` — Model A (4-dataset, AUROC 0.710)
+- `adapters/lidc-malignancy-5dataset-step10000/` — 5-dataset step 10K (AUROC 0.672)
+- `adapters/lidc-malignancy-5dataset-step25000/` — 5-dataset step 25K (AUROC 0.639)
+- `adapters/lidc-malignancy-5dataset-step50000/` — 5-dataset step 50K (AUROC 0.635)
+- `adapters/lidc-malignancy-5dataset-50k-lr1e-3/` — 5-dataset 50K, LR=1e-3 (AUROC 0.680)
+- `adapters/lidc-malignancy-5dataset-50k-lr1e-4/` — 5-dataset 50K, LR=1e-4 (AUROC 0.619)
+- `adapters/lidc-malignancy-5dataset-50k-lr2e-4/` — 5-dataset 50K, LR=2e-4 (AUROC 0.668)
+- `runs/20260422_202622_5dataset-phase3-small/` — Training run + view retrieval JSONs
+
+---
+
+## 5-Dataset Phase 3 Pretraining (2026-04-22)
+
+**Goal:** Train ViT-Small on 5 datasets (400K slices across 4 organs) with all
+anti-memorization constraints active. First pan-organ training run.
+
+### Datasets (Temperature-Scaled, T=2.0)
+
+| Dataset | Organ | Raw Slices | T=2.0 Sampled | Factor |
+|---------|-------|-----------|---------------|--------|
+| LIDC-IDRI | Lung | 243,990 | 163,220 | 0.67× ↓ |
+| CQ500 | Brain | 103,711 | 106,415 | 1.03× |
+| MSD-Hepatic | Liver | 21,120 | 48,021 | 2.27× ↑ |
+| Pancreas-CT | Abdomen | 17,764 | 44,041 | 2.48× ↑ |
+| MSD-Colon | Colon | 13,486 | 38,373 | 2.85× ↑ |
+| **Total** | | **400,071** | **400,070** | |
+
+### Training Configuration
+
+- **Model:** ViT-Small (dim=384, depth=12, heads=6, patch=14, ~70.2M with projector)
+- **Effective batch:** 128 (batch=32 × accum=4)
+- **Optimizer:** AdamW, lr=2e-4, cosine decay to 1e-6, warmup=2,500 steps
+- **Loss:** DINO + Gram(1.0) + KoLeo(0.1)
+- **Anti-memorization:** crop_scale_min=0.3, z_stride=3, diverse_batches=True
+- **AMP:** bfloat16 (no grad scaler)
+- **Steps:** 50,000 (~53 epochs)
+- **Hardware:** AMD Radeon 8060S (Strix Halo), ROCm 7.11
+- **Throughput:** ~390 samples/s (stabilized), total ~4.8 hours
+- **Git commit:** `20ee253a`
+- **Data manifest hash:** `817d2641b44806db`
+
+### Training Dynamics
+
+| Step | Loss | LR | Samples/s |
+|------|------|----|-----------|
+| 0 | 8.78 | 8.0e-8 | 3.1 |
+| 1,000 | 6.81 | 8.0e-5 | 369 |
+| 2,000 | 3.32 | 1.6e-4 | 394 |
+| 5,000 | ~2.0 | 2.0e-4 | ~390 |
+
+Monitor at step 1,000: Embed-L0 std=0.099, Gram mean=0.996 (healthy).
+Monitor at step 2,000: Embed-L0 std=0.052, Gram mean=0.999 (attention tightening).
+
+No NaN events. `F.log_softmax` fix held throughout bfloat16 training.
+
+### Artifacts
+
+- `runs/20260422_202622_5dataset-phase3-small/` — Full run directory
+- `data/mvp/combined_5dataset_t2.csv` — Temperature-scaled index
+- `data/mvp/split_manifest_5dataset.json` — Train/val split
+
+---
+
+## 4-Dataset Anti-Memorization Ablation (2026-04-22)
+
+**Goal:** Fix catastrophic collapse at epoch 3 in multi-organ training by blocking
+shortcut learning pathways. The previous 4-dataset run (without anti-memorization)
+collapsed to loss=0.05 and retrieval ratio=1.0× by epoch 3.
+
+### Anti-Memorization Patches Applied
+
+1. **KoLeo regularization** (weight=0.1): Forces embeddings to spread uniformly on
+   the hypersphere, preventing trivial domain clustering.
+2. **Aggressive crop** (scale_min=0.3): Wider RandomResizedCrop forces network to
+   match extreme local details with global context.
+3. **Z-stride=3**: Skip 2 slices between consecutive samples to break Z-axis
+   contiguous memory leak.
+4. **Diverse batches**: Ensure each mini-batch contains slices from multiple datasets.
+
+### Results
+
+| Step | Loss | View Retrieval Ratio |
+|------|------|---------------------|
+| 1,000 | 0.58 | — |
+| 2,000 | 0.47 | — |
+| 3,000 | 0.32 | 5.0× |
+| 5,000 | 0.18 | **7.0×** ✓ |
+
+**Success:** Ratio climbing at 7.0× with no collapse. Loss at 0.18 is low but the
+climbing retrieval ratio proves the model is learning structural features, not
+memorizing. The architecture is cleared for Phase 3 (5-dataset training).
+
+### Artifacts
+
+- `runs/vit-small-4dataset-ablation/20260422_104149/` — Run directory
+- `runs/vit-small-4dataset-ablation/20260422_104149/checkpoint_final_00005000.pth` — Final checkpoint (Model A backbone)
+
+---
+
+## LIDC-IDRI Nodule Malignancy LoRA Benchmark (2026-04-22)
+
+**Goal:** First proof-of-value for frozen DINO-X backbone. Fine-tune a LoRA adapter
+on LIDC-IDRI nodule malignancy classification to beat the linear probe baseline
+(AUROC 0.687) and approach the supervised ResNet18 literature baseline (0.767).
+
+### Data Pipeline
+
+- **Source:** pylidc annotations, consensus ≥3 raters, malignancy threshold=3
+- **Crops:** Nodule-centered bounding box with 2× padding, resized to target size
+- **Split:** Patient-stratified 70/13/17 — 1,300 train / 262 val / 315 test
+
+### Crop Size Ablation (4-dataset backbone, LR=5e-4 unless noted)
+
+| Crop Size | HU Window | LR | Val AUROC | Notes |
+|-----------|-----------|-----|-----------|-------|
+| 64px | Lung (L=-30, W=120) | 5e-4 | **0.710** | **Best** — nodule fills FOV |
+| 64px | Wide (L=40, W=400) | 5e-4 | 0.684 | Generic window compresses signal |
+| 64px | Wide (L=40, W=400) | 1e-3 | 0.681 | First attempt |
+| 128px | Wide (L=40, W=400) | 1e-3 | 0.566 | Nodule still too small |
+| 224px | Wide (L=40, W=400) | 1e-3 | 0.590 | Nodule tiny; crop can exclude it |
+
+### Key Findings
+
+1. **Crop size dominates:** 64px crops (nodule fills FOV) >> 128px >> 224px.
+   Upscaling blur is less harmful than having the nodule be a tiny fraction of input.
+2. **Task-specific HU windowing adds +3%:** Lung window vs generic wide window.
+3. **3-slice vs 1-slice gap:** Backbone pretrained on 3 consecutive z-slices (2.5D),
+   but fine-tuning loads single slice replicated 3×. Likely explains nodule-level gap.
+
+### Held-Out Test Set Results (Best Model: 64px, Lung Window)
+
+| Level | AUROC |
+|-------|-------|
+| Nodule-level | 0.667 |
+| Patient-level | **0.706** |
+
+Patient-level AUROC 0.706 beats the linear probe baseline (0.687). Gap to ResNet18
+literature baseline (0.767) suggests room for improvement with 2.5D input matching
+and larger backbone.
+
+### Artifacts
+
+- `adapters/lidc-malignancy-lora-r8-64px-lung-window/` — Best adapter
+- `scripts/preprocessing/extract_lidc_malignancy.py` — Extraction pipeline
+- `data/lidc-idri/labels/malignancy_{train,val,test}.csv` — Split CSVs
 
 ---
 

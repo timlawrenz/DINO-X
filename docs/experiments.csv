@@ -1,4 +1,7 @@
 Run ID,Date,Model,Patch,Dim,Batch,Accum,Eff Batch,LR,Min LR,Warmup,T-Temp,Gram,Status,Notes,Device,Commit
+20260422_202622_5dataset-phase3-small,2026-04-22 20:26:22 UTC,vit-small,14,384,32,4,128,2e-4,1e-06,2500,0.04,1.0,Completed,5-dataset pan-organ. 400K slices. View retrieval 56x. KoLeo=0.1 crop=0.3 z-stride=3 diverse-batches. bf16.,Radeon 8060S (Strix Halo),20ee253
+20260422_104149_4dataset-ablation,2026-04-22 10:41:49 UTC,vit-small,14,384,32,4,128,2e-4,1e-06,500,0.04,1.0,Completed,Anti-memorization ablation. View retrieval 7.0x at 5K steps. KoLeo=0.1 crop=0.3 z-stride=3.,RTX 2070 SUPER,6e00f41
+20260422_vit-small-4dataset-t2,2026-04-22 08:00:00 UTC,vit-small,14,384,32,4,128,2e-4,1e-06,500,0.04,1.0,Completed,4-dataset temp-sampled. Collapsed epoch 3 (loss=0.05 ratio=1.0x). No anti-memorization.,RTX 2070 SUPER,b7ad417
 20260109_162920_4090_512px_DeepFreeze,2026-01-09 21:29:20 UTC,vit-large,14,1024,16,16,256,2e-05,1e-06,3000,0.02,1.0,Running,,NVIDIA GeForce RTX 4090,1f31284
 20260109_104007_4090_LowLR_IceAge,2026-01-09 15:40:07 UTC,vit-large,14,1024,64,4,256,5e-05,1e-06,1000,0.02,1.0,Completed,Success. Best stability. Found Golden Zone LR ~2e-5. Drifted up at 5e-5.,NVIDIA GeForce RTX 4090,1f31284
 20260108_203723_4090_IceAge,2026-01-09 01:37:23 UTC,vit-large,14,1024,64,4,256,0.0002,1e-06,1000,0.02,1.0,Completed,Success! Broken entropy wall (6.78). Frozen Teacher (0.9995) + Sharp Temp (0.02).,NVIDIA GeForce RTX 4090,1f31284
