@@ -1350,14 +1350,32 @@ def main() -> None:
     else:
         model_cfg = MODEL_CONFIGS[args.config]
         # Allow overrides
+        overridden = False
         if args.vit_patch:
             model_cfg.patch = args.vit_patch
+            overridden = True
         if args.vit_dim:
             model_cfg.dim = args.vit_dim
+            overridden = True
         if args.vit_depth:
             model_cfg.depth = args.vit_depth
+            overridden = True
         if args.vit_heads:
             model_cfg.heads = args.vit_heads
+            overridden = True
+        if overridden:
+            # Update name to match known preset or mark as custom
+            matched = False
+            for preset_name, preset_cfg in MODEL_CONFIGS.items():
+                if (model_cfg.patch == preset_cfg.patch and
+                    model_cfg.dim == preset_cfg.dim and
+                    model_cfg.depth == preset_cfg.depth and
+                    model_cfg.heads == preset_cfg.heads):
+                    model_cfg.name = preset_name
+                    matched = True
+                    break
+            if not matched:
+                model_cfg.name = "custom"
     
     # Override out_dim if specified
     if args.out_dim:
