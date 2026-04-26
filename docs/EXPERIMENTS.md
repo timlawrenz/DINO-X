@@ -1,6 +1,89 @@
 # Experiments Log
 
-Updated: 2026-04-23
+Updated: 2026-04-26
+
+---
+
+## 5-Dataset Phase 3 Extended: Doubled Batch Size (2026-04-26)
+
+**Goal:** Test whether doubling the effective batch size from 128 to 256 (the DINO
+paper's recommended minimum) improves representations. This was the "next experiment"
+identified in the LoRA benchmark analysis.
+
+### Training Configuration
+
+- **Model:** ViT-Small (dim=384, depth=12, heads=6, patch=14, ~70.2M with projector)
+- **Effective batch:** 256 (batch=64 × accum=4) — **doubled from Phase 3's 128**
+- **Optimizer:** AdamW, lr=2e-4, cosine decay to 1e-6, warmup=2,500 steps
+- **Loss:** DINO + Gram(1.0) + KoLeo(0.1)
+- **Anti-memorization:** crop_scale_min=0.3, z_stride=3, diverse_batches=True
+- **AMP:** bfloat16
+- **Steps:** 50,000 (resumed from step 40,338)
+- **Hardware:** AMD Radeon 8060S (Strix Halo), ROCm 7.11
+- **Data:** 5-dataset temperature-scaled index (400K slices, same as Phase 3)
+- **Run directory:** `runs/20260423_171906_5dataset-phase3-small-bs256/`
+- **Git commit:** `e8fc8d1`
+
+### View Retrieval (Step 50K, N=512)
+
+| Metric | Value |
+|--------|-------|
+| top-1 accuracy | 10.5% |
+| top-5 accuracy | 39.5% |
+| Random baseline | 0.2% |
+| **Ratio vs random** | **54.0×** |
+| Passed | ✅ |
+
+### Comparison: Batch 128 vs Batch 256
+
+| Metric | Eff Batch=128 | Eff Batch=256 |
+|--------|--------------|---------------|
+| View retrieval (50K) | 56.0× | 54.0× |
+| Run directory | `20260422_202622_...` | `20260423_171906_...` |
+
+The doubled batch size produces comparable view retrieval (54× vs 56×). The slight
+decrease is within noise for N=512 evaluation.
+
+### LoRA Fine-Tuning (LIDC Malignancy, bs256 Backbone)
+
+Same protocol as the original benchmark: LoRA rank=8, alpha=16, 64px nodule crops,
+lung HU window (level=-30, width=120 scaled), 50 epochs, early stopping on val AUROC
+(patience=10). 1,300 train / 262 val nodules.
+
+| LR | Val AUROC | Val Accuracy | Best Epoch |
+|----|-----------|-------------|------------|
+| 5e-4 | 0.684 | 0.653 | 14 |
+| 1e-3 | 0.674 | 0.607 | 43 |
+
+### Full Comparison: All Backbones
+
+| Backbone | Eff Batch | View Retrieval | Best LoRA AUROC | Best LR |
+|----------|-----------|---------------|-----------------|---------|
+| **4-dataset** | **128** | **7.0×** | **0.710** | **5e-4** |
+| 5-dataset (batch=128) | 128 | 56.0× | 0.680 | 1e-3 |
+| 5-dataset (batch=256) | 256 | 54.0× | 0.684 | 5e-4 |
+
+### Analysis
+
+1. **Doubling batch size did not close the gap:** The bs256 backbone (0.684) is
+   essentially identical to the bs128 backbone's best (0.680), both ~3% below the
+   4-dataset specialist (0.710). The DINO paper's batch size recommendation does
+   not help with the capacity dilution problem.
+
+2. **Capacity dilution is the bottleneck:** ViT-Small (22M params) cannot maintain
+   organ-specific features when trained across 5 organs. The path forward is
+   ViT-Large (or larger), not hyperparameter tuning of ViT-Small.
+
+3. **View retrieval ≠ downstream performance:** The 5-dataset models have dramatically
+   better general representations (54-56× vs 7×) but worse lung-specific LoRA
+   performance. View retrieval measures representation generality, not task fitness.
+
+### Artifacts
+
+- `runs/20260423_171906_5dataset-phase3-small-bs256/checkpoint_final_00050000.pth`
+- `runs/20260423_171906_5dataset-phase3-small-bs256/view_retrieval_step50000_N512.json`
+- `adapters/lidc-malignancy-5dataset-bs256-step50000-lr5e-4/` — AUROC 0.684
+- `adapters/lidc-malignancy-5dataset-bs256-step50000-lr1e-3/` — AUROC 0.674
 
 ---
 
