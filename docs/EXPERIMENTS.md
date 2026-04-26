@@ -63,7 +63,17 @@ fundamentally a backbone representation issue — the 5-dataset model's feature 
 diluted by non-lung anatomy. The most promising path is **longer pretraining** (extending
 the cosine schedule to 100K steps), since LoRA AUROC was still climbing at 50K.
 
-**Next step:** Run Experiment 1 (100K-step pretraining) on Strix Halo with:
+### Experiment 1: Extended Pretraining to 100K Steps (Final ViT-Small Experiment)
+
+This is the **last experiment for the ViT-Small backbone**. The ablation scan exhausted
+LoRA-side interventions; only the backbone itself can improve further. Resume from the
+50K checkpoint with the cosine schedule re-stretched to 100K total steps.
+
+**Important:** This re-stretches the cosine LR schedule. At step 50K the LR will be at
+its cosine midpoint (~1e-4), not the floor (1e-6). This is effectively a warm restart,
+which may help escape the entropy collapse observed at 35-50K.
+
+**Run on Strix Halo:**
 ```bash
 TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1 \
 MIOPEN_USER_DB_PATH=~/.config/miopen \
@@ -85,9 +95,31 @@ python scripts/phase5_big_run.py \
   --run-suffix 5dataset-phase3-small-bs256-100k \
   --resume runs/20260423_171906_5dataset-phase3-small-bs256/checkpoint_final_00050000.pth
 ```
-Note: This re-stretches the cosine LR schedule to 100K total steps. The LR will restart
-from its cosine midpoint at step 50K, so this is a "warm restart" experiment, not pure
-longer training.
+
+**After training, evaluate with:**
+```bash
+# View retrieval (on Strix Halo)
+TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1 \
+PYTHONUNBUFFERED=1 python scripts/phase5_view_retrieval_eval.py \
+  --checkpoint runs/<run_dir>/checkpoint_final_00100000.pth \
+  --split-manifest data/mvp/split_manifest_5dataset.json \
+  --index-csv data/mvp/combined_5dataset_t2.csv \
+  --scale-aware --n 512
+
+# LoRA benchmark (on any CUDA machine)
+python scripts/finetune_lora.py \
+  --backbone runs/<run_dir>/checkpoint_final_00100000.pth \
+  --train-csv /mnt/nas-ai-models/training-data/dino-x/lidc-idri/labels/malignancy_train.csv \
+  --val-csv /mnt/nas-ai-models/training-data/dino-x/lidc-idri/labels/malignancy_val.csv \
+  --window-level -30 --window-width 120 \
+  --rank 8 --alpha 16 --lr 5e-4 \
+  --es-metric auroc --seed 42 \
+  --output adapters/lidc-malignancy-5dataset-bs256-100k-seed42
+```
+
+**Success criteria:** LoRA AUROC > 0.685 (beat r=16 ablation) and ideally approach 0.710
+(4-dataset model). If not, the ViT-Small capacity is saturated on 5 datasets and the path
+forward is scaling to ViT-Base or ViT-Large.
 
 ---
 
