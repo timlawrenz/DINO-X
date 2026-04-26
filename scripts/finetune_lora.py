@@ -45,6 +45,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+import random
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -103,6 +105,9 @@ class FinetuneConfig:
     best_val_metrics: dict[str, float] = field(default_factory=dict)
     train_samples: int = 0
     val_samples: int = 0
+    seed: int | None = None
+    unfreeze_blocks: int = 0
+    backbone_lr: float | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -485,7 +490,11 @@ def save_finetune(
     output_dir: Path,
     config: FinetuneConfig,
 ) -> None:
-    """Save adapter weights, task head, and config."""
+    """Save adapter weights, task head, and config.
+
+    When unfreeze_blocks > 0, also saves the unfrozen block state dicts
+    so that the full fine-tuned model can be reconstructed.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Save LoRA adapter via peft
@@ -493,6 +502,25 @@ def save_finetune(
 
     # Save task head separately
     torch.save(model.head.state_dict(), output_dir / "head.pth")
+
+    # Save unfrozen block weights if partial unfreezing was used
+    if config.unfreeze_blocks > 0:
+        base = model.backbone.base_model.model  # PatchViT
+        n_blocks = len(base.blocks)
+        n_unfreeze = min(config.unfreeze_blocks, n_blocks)
+        unfreeze_start = n_blocks - n_unfreeze
+
+        unfrozen_state = {}
+        for i in range(unfreeze_start, n_blocks):
+            for name, param in base.blocks[i].named_parameters():
+                key = f"blocks.{i}.{name}"
+                unfrozen_state[key] = param.data.cpu()
+
+        torch.save(unfrozen_state, output_dir / "unfrozen_blocks.pth")
+        logger.info(
+            "Saved %d unfrozen block params to unfrozen_blocks.pth",
+            len(unfrozen_state),
+        )
 
     # Save metadata
     config_dict = asdict(config)
@@ -560,6 +588,16 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--no-amp", action="store_true",
                         help="Disable mixed precision")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Random seed for reproducibility (torch, numpy, random)")
+
+    # Partial unfreezing
+    parser.add_argument("--unfreeze-blocks", type=int, default=0,
+                        help="Number of final transformer blocks to unfreeze "
+                             "(0 = pure LoRA, no base params unfrozen)")
+    parser.add_argument("--backbone-lr", type=float, default=1e-5,
+                        help="LR for unfrozen backbone blocks (only used when "
+                             "--unfreeze-blocks > 0)")
 
     # Output
     parser.add_argument("--output", required=True, type=Path,
@@ -569,6 +607,17 @@ def main(argv: list[str] | None = None) -> None:
 
     device = torch.device(args.device)
     amp_enabled = not args.no_amp and device.type == "cuda"
+
+    # ── Seed everything ───────────────────────────────────────────────
+    if args.seed is not None:
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(args.seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        logger.info("Seed set to %d (deterministic mode)", args.seed)
 
     # ── Load backbone ──────────────────────────────────────────────────
     logger.info("Loading backbone: %s", args.backbone)
@@ -623,9 +672,24 @@ def main(argv: list[str] | None = None) -> None:
         augment=False, data_root=args.data_root,
     )
 
+    # DataLoader seed for reproducibility
+    dl_generator = None
+    dl_worker_init = None
+    if args.seed is not None:
+        dl_generator = torch.Generator()
+        dl_generator.manual_seed(args.seed)
+
+        def _seed_worker(worker_id: int) -> None:
+            seed = torch.initial_seed() % 2**32
+            np.random.seed(seed)
+            random.seed(seed)
+
+        dl_worker_init = _seed_worker
+
     train_loader = DataLoader(
         train_ds, batch_size=args.batch_size, shuffle=True,
         num_workers=args.num_workers, pin_memory=True, drop_last=True,
+        generator=dl_generator, worker_init_fn=dl_worker_init,
     )
     val_loader = DataLoader(
         val_ds, batch_size=args.batch_size, shuffle=False,
@@ -638,6 +702,31 @@ def main(argv: list[str] | None = None) -> None:
         backbone, rank=args.rank, alpha=args.alpha, dropout=args.lora_dropout,
     )
 
+    # ── Partial unfreezing (optional) ─────────────────────────────────
+    unfrozen_block_params = []
+    if args.unfreeze_blocks > 0:
+        # Access the underlying model inside PEFT wrapper
+        base = backbone.base_model.model  # PatchViT
+        n_blocks = len(base.blocks)
+        n_unfreeze = min(args.unfreeze_blocks, n_blocks)
+        unfreeze_start = n_blocks - n_unfreeze
+
+        unfrozen_count = 0
+        for i in range(unfreeze_start, n_blocks):
+            for param in base.blocks[i].parameters():
+                if not param.requires_grad:
+                    param.requires_grad = True
+                    unfrozen_count += 1
+                    unfrozen_block_params.append(param)
+                else:
+                    # Already trainable (LoRA param) — skip
+                    pass
+
+        logger.info(
+            "Unfroze last %d/%d transformer blocks (%d params, backbone_lr=%.1e)",
+            n_unfreeze, n_blocks, unfrozen_count, args.backbone_lr,
+        )
+
     model = FinetuneModel(
         backbone=backbone,
         dim=dim,
@@ -648,19 +737,30 @@ def main(argv: list[str] | None = None) -> None:
     # Count parameters
     params = count_parameters(backbone)
     head_params = sum(p.numel() for p in model.head.parameters())
+    n_unfrozen_base = sum(p.numel() for p in unfrozen_block_params)
     logger.info(
-        "Parameters — backbone: %d total (%d trainable LoRA), head: %d",
-        params["total"], params["trainable"], head_params,
+        "Parameters — backbone: %d total (%d trainable LoRA + %d unfrozen base), head: %d",
+        params["total"], params["trainable"] - n_unfrozen_base, n_unfrozen_base,
+        head_params,
     )
 
     # ── Optimizer + scheduler ──────────────────────────────────────────
-    trainable_params = [
-        {"params": [p for p in backbone.parameters() if p.requires_grad],
-         "lr": args.lr},
+    # Separate LR groups: LoRA params, unfrozen backbone, head
+    unfrozen_ids = {id(p) for p in unfrozen_block_params}
+    lora_params = [
+        p for n, p in backbone.named_parameters()
+        if p.requires_grad and id(p) not in unfrozen_ids
+    ]
+    param_groups = [
+        {"params": lora_params, "lr": args.lr},
         {"params": model.head.parameters(), "lr": args.lr},
     ]
+    if unfrozen_block_params:
+        param_groups.append(
+            {"params": unfrozen_block_params, "lr": args.backbone_lr}
+        )
     optimizer = torch.optim.AdamW(
-        trainable_params, weight_decay=args.weight_decay,
+        param_groups, weight_decay=args.weight_decay,
     )
 
     # Cosine schedule with linear warmup
@@ -691,6 +791,9 @@ def main(argv: list[str] | None = None) -> None:
         scale_aware=scale_aware,
         train_samples=len(train_rows),
         val_samples=len(val_rows),
+        seed=args.seed,
+        unfreeze_blocks=args.unfreeze_blocks,
+        backbone_lr=args.backbone_lr if args.unfreeze_blocks > 0 else None,
     )
 
     # ── Training loop ──────────────────────────────────────────────────

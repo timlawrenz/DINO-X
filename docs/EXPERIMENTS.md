@@ -1,6 +1,93 @@
 # Experiments Log
 
-Updated: 2026-04-26
+Updated: 2026-04-27
+
+---
+
+## Ablation Scan: 5-Dataset bs256 50K → Closing the AUROC Gap (2026-04-27)
+
+**Goal:** Identify interventions to close the gap between the 5-dataset pan-organ backbone
+(AUROC 0.684 unseeded) and the 4-dataset lung specialist (AUROC 0.710) on LIDC malignancy
+classification via LoRA fine-tuning.
+
+**Key insight from prior analysis:** LoRA AUROC on the 5-dataset bs256 model was still
+climbing at step 50K (17K=0.659, 35K=0.645, 50K=0.684), suggesting the model may benefit
+from longer pretraining.
+
+### Ablation Protocol
+- **Backbone:** 5-dataset bs256 50K checkpoint
+- **LoRA:** rank=8 baseline, targets=qkv+proj+fc1+fc2
+- **Task:** LIDC malignancy binary classification (1300 train / 262 val)
+- **Crops:** 64px nodule crops, lung HU window (level=-30, width=120)
+- **Training:** 50 epochs, batch=32, lr=5e-4, patience=10, `--es-metric auroc`
+- **Seeded:** `--seed 42` for reproducibility
+- **Script:** `scripts/ablation_5dataset_bs256.sh`
+
+### Results
+
+| Experiment | Rank | Unfreeze | Crop | AUROC | Best Epoch | Δ vs Baseline |
+|---|---|---|---|---|---|---|
+| Baseline (seeded) | 8 | 0 | 64px | 0.668 | 25 | — |
+| Higher rank | 16 | 0 | 64px | **0.685** | 20 | **+0.017** |
+| Higher rank | 32 | 0 | 64px | 0.670 | 25 | +0.002 |
+| Partial unfreeze | 8 | 1 block | 64px | 0.659 | 19 | -0.009 |
+| 128px crops | 8 | 0 | 128px | 0.589 | 13 | -0.079 |
+
+**Reference (unseeded):** Baseline r=8 without seed=42 achieved 0.684 (best epoch 14).
+The ~0.016 gap between seeded (0.668) and unseeded (0.684) baseline demonstrates significant
+run-to-run variance on 262 validation samples.
+
+### Analysis
+
+1. **LoRA rank=16 is the only positive signal** (+0.017 over seeded baseline). It matches
+   the unseeded baseline result (0.685 vs 0.684), suggesting the apparent improvement may
+   be within noise. Rank=32 overfits — more parameters than the 1300-sample training set
+   can support.
+
+2. **Partial unfreezing hurts** (-0.009). With only 1300 training samples, even 1 unfrozen
+   block (1.77M params at lr=1e-5) destabilizes the pretrained representations. The
+   LoRA-only approach is better for small downstream datasets.
+
+3. **128px crops dramatically worse** (-0.079). Confirms prior 4-dataset result (0.57).
+   The 64px tight crop focuses the model on the nodule; 128px adds surrounding parenchyma
+   that dilutes the signal. This is a fundamental task property, not a backbone issue.
+
+4. **Run-to-run variance is substantial** (~0.016 between seeded/unseeded). With 262
+   val samples, differences <0.02 are not statistically meaningful. Multi-seed runs would
+   be needed to separate signal from noise.
+
+### Conclusion
+
+No LoRA-side intervention bridges the 0.026 gap to the 4-dataset model. The gap is
+fundamentally a backbone representation issue — the 5-dataset model's feature space is
+diluted by non-lung anatomy. The most promising path is **longer pretraining** (extending
+the cosine schedule to 100K steps), since LoRA AUROC was still climbing at 50K.
+
+**Next step:** Run Experiment 1 (100K-step pretraining) on Strix Halo with:
+```bash
+TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1 \
+MIOPEN_USER_DB_PATH=~/.config/miopen \
+MIOPEN_FIND_MODE=2 \
+PYTORCH_TUNABLEOP_TUNING=1 \
+PYTORCH_TUNABLEOP_ENABLED=1 \
+TORCH_BLAS_PREFER_HIPBLASLT=1 \
+PYTHONUNBUFFERED=1 \
+python scripts/phase5_big_run.py \
+  --index-csv data/mvp/combined_5dataset_t2.csv \
+  --split-manifest data/mvp/split_manifest_5dataset.json \
+  --vit-patch 14 --vit-dim 384 --vit-depth 12 --vit-heads 6 \
+  --batch-size 64 --accumulation-steps 4 \
+  --lr 2e-4 --min-lr 1e-6 --warmup-steps 2500 \
+  --max-steps 100000 --ckpt-every 5000 \
+  --crop-scale-min 0.3 --z-stride 3 --diverse-batches \
+  --koleo-weight 0.1 --gram-weight 1.0 \
+  --scale-aware --amp-dtype bfloat16 \
+  --run-suffix 5dataset-phase3-small-bs256-100k \
+  --resume runs/20260423_171906_5dataset-phase3-small-bs256/checkpoint_final_00050000.pth
+```
+Note: This re-stretches the cosine LR schedule to 100K total steps. The LR will restart
+from its cosine midpoint at step 50K, so this is a "warm restart" experiment, not pure
+longer training.
 
 ---
 
