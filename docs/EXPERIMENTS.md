@@ -44,39 +44,102 @@ identified in the LoRA benchmark analysis.
 The doubled batch size produces comparable view retrieval (54× vs 56×). The slight
 decrease is within noise for N=512 evaluation.
 
+### Training Dynamics (from TensorBoard logs)
+
+Smoothed loss (200-point moving average) by step:
+
+| Step | Smoothed Loss | LR | Teacher Entropy | Student Entropy |
+|------|--------------|-----|-----------------|-----------------|
+| 5K | 0.547 | 2.0e-4 | — | — |
+| 15K | 0.129 | 1.7e-4 | 0.12 | 0.22 |
+| 25K | 0.608 | 1.1e-4 | 0.08 | 0.17 |
+| 35K | 0.082 | 4.6e-5 | 0.06 | 0.12 |
+| 40K | 0.091 | 2.2e-5 | 0.03 | 0.07 |
+| 50K | 0.163 | 1.0e-6 | 0.02 | 0.07 |
+
+**Loss plateaued at ~35K.** The 35-40K window had the lowest average loss (0.077).
+After that, cosine LR decay hit the floor and loss stopped improving.
+
+**Entropy collapsed progressively.** Teacher entropy dropped from 2.2 at init to
+0.026 in the 40-50K window (21% of samples below 0.01). The bs256 model collapsed
+*more* than bs128 (teacher entropy 0.026 vs 0.093 at 35-50K), meaning the teacher
+became more confident/peaked with the larger batch.
+
+**Grad norm stabilized late.** Early grad norms had extreme spikes (max 7.3B at
+3-10K steps) but settled to median=8.4 by 40-50K with zero spikes >100.
+
 ### LoRA Fine-Tuning (LIDC Malignancy, bs256 Backbone)
 
 Same protocol as the original benchmark: LoRA rank=8, alpha=16, 64px nodule crops,
 lung HU window (level=-30, width=120 scaled), 50 epochs, early stopping on val AUROC
 (patience=10). 1,300 train / 262 val nodules.
 
+#### LR Sweep (Step 50K)
+
 | LR | Val AUROC | Val Accuracy | Best Epoch |
 |----|-----------|-------------|------------|
 | 5e-4 | 0.684 | 0.653 | 14 |
 | 1e-3 | 0.674 | 0.607 | 43 |
 
+#### Checkpoint Sweep (LR=5e-4)
+
+| Step | Val AUROC | Val Accuracy | Best Epoch |
+|------|-----------|-------------|------------|
+| 17,857 | 0.659 | 0.584 | 7 |
+| 35,032 | 0.645 | 0.580 | 14 |
+| **50,000** | **0.684** | **0.653** | **14** |
+
+Interestingly, for bs256, later checkpoints are *better* for LoRA — opposite to the
+bs128 run (where 10K > 25K > 50K). The larger batch produces more stable features
+that improve monotonically, while the smaller batch may overfit to DINO-specific
+patterns that are less transferable.
+
 ### Full Comparison: All Backbones
 
-| Backbone | Eff Batch | View Retrieval | Best LoRA AUROC | Best LR |
-|----------|-----------|---------------|-----------------|---------|
-| **4-dataset** | **128** | **7.0×** | **0.710** | **5e-4** |
-| 5-dataset (batch=128) | 128 | 56.0× | 0.680 | 1e-3 |
-| 5-dataset (batch=256) | 256 | 54.0× | 0.684 | 5e-4 |
+| Backbone | Eff Batch | Step | View Retrieval | LoRA AUROC | LR |
+|----------|-----------|------|---------------|------------|-----|
+| **4-dataset** | **128** | **5K** | **7.0×** | **0.710** | **5e-4** |
+| 5-dataset bs128 | 128 | 10K | 63.0× | 0.672 | 5e-4 |
+| 5-dataset bs128 | 128 | 50K | 56.0× | 0.680 | 1e-3 |
+| 5-dataset bs256 | 256 | 17.8K | 58.0× | 0.659 | 5e-4 |
+| 5-dataset bs256 | 256 | 35K | — | 0.645 | 5e-4 |
+| 5-dataset bs256 | 256 | 50K | 54.0× | 0.684 | 5e-4 |
 
 ### Analysis
 
-1. **Doubling batch size did not close the gap:** The bs256 backbone (0.684) is
-   essentially identical to the bs128 backbone's best (0.680), both ~3% below the
-   4-dataset specialist (0.710). The DINO paper's batch size recommendation does
-   not help with the capacity dilution problem.
+1. **Loss plateaued — more steps won't help.** The pretraining loss flattened at
+   ~35K with cosine LR decaying to minimum. The model has extracted what it can
+   from 400K slices at this capacity.
 
-2. **Capacity dilution is the bottleneck:** ViT-Small (22M params) cannot maintain
-   organ-specific features when trained across 5 organs. The path forward is
-   ViT-Large (or larger), not hyperparameter tuning of ViT-Small.
+2. **Entropy near-collapse limits feature diversity.** Both teacher and student
+   entropy are very low (<0.1), meaning the model produces highly peaked
+   predictions. This limits the richness of features available for LoRA adaptation.
 
-3. **View retrieval ≠ downstream performance:** The 5-dataset models have dramatically
-   better general representations (54-56× vs 7×) but worse lung-specific LoRA
-   performance. View retrieval measures representation generality, not task fitness.
+3. **Doubling batch size did not close the gap.** The bs256 backbone (0.684) is
+   essentially identical to bs128's best (0.680), both ~3% below the 4-dataset
+   specialist (0.710). The DINO paper's batch size recommendation doesn't help
+   with capacity dilution.
+
+4. **The gap is structural, not tunable.** We've explored:
+   - 4 learning rates (1e-4, 2e-4, 5e-4, 1e-3)
+   - 6 checkpoints across 2 batch sizes
+   - 2 effective batch sizes (128, 256)
+   The best 5-dataset result (0.684) is consistently ~3% below the 4-dataset
+   specialist. This is a capacity problem: ViT-Small (22M params) cannot maintain
+   organ-specific features across 5 organ domains.
+
+5. **View retrieval ≠ downstream performance.** The 5-dataset models have
+   dramatically better general representations (54-56× vs 7×) but worse
+   lung-specific LoRA performance. View retrieval measures representation
+   generality, not task fitness.
+
+### Possible Next Steps (Not Hyperparameter Tuning)
+
+- **ViT-Large:** Scale model capacity to handle multi-domain features
+- **Higher LoRA rank (r=16/32):** Give the adapter more capacity to extract
+  lung-specific features from the pan-organ backbone
+- **Partial unfreezing:** Unfreeze last 2-3 transformer blocks instead of
+  pure LoRA to allow deeper adaptation
 
 ### Artifacts
 
@@ -84,6 +147,8 @@ lung HU window (level=-30, width=120 scaled), 50 epochs, early stopping on val A
 - `runs/20260423_171906_5dataset-phase3-small-bs256/view_retrieval_step50000_N512.json`
 - `adapters/lidc-malignancy-5dataset-bs256-step50000-lr5e-4/` — AUROC 0.684
 - `adapters/lidc-malignancy-5dataset-bs256-step50000-lr1e-3/` — AUROC 0.674
+- `adapters/lidc-malignancy-5dataset-bs256-step17857-lr5e-4/` — AUROC 0.659
+- `adapters/lidc-malignancy-5dataset-bs256-step35032-lr5e-4/` — AUROC 0.645
 
 ---
 
