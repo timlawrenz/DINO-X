@@ -1484,7 +1484,15 @@ def main() -> None:
                 raise FileNotFoundError(f"Run directory does not exist: {args.run_dir}")
         else:
             resume_from = Path(args.resume)
-            run_dir = resume_from.parent
+            if args.run_suffix:
+                # New directory for a distinct experiment resuming from another run
+                run_id = time.strftime("%Y%m%d_%H%M%S")
+                run_id = f"{run_id}_{args.run_suffix}"
+                run_dir = args.run_dir / run_id
+                run_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                # Continue in the same run directory as the checkpoint
+                run_dir = resume_from.parent
     else:
         # New run
         run_id = time.strftime("%Y%m%d_%H%M%S")
