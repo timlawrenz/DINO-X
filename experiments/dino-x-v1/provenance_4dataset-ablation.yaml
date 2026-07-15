@@ -1,0 +1,38 @@
+arm: 4dataset-ablation
+hypothesis: >
+  Anti-memorization interventions — KoLeo regularization (weight=0.1), aggressive
+  random crop (scale_min=0.3), z-stride=3 (break Z-axis contiguous memory leak),
+  and diverse batches (max one sample per series per batch) — prevent the
+  catastrophic feature collapse observed at epoch 3 in prior 4-dataset multi-organ
+  training.
+falsified_if: >
+  Loss drops below 0.1 (near-zero, indicating collapse) OR view retrieval ratio
+  drops to 1.0× (no better than random) by epoch 3. Effectively: the same collapse
+  pattern as the pre-ablation 4-dataset run recurs despite the interventions.
+pre_registered_gate: >
+  PASS if loss > 0.1 after 3,000 steps (avoiding collapse) AND view retrieval ratio
+  ≥ 3.0× at step 5,000 AND no NaN events.
+differs_from: two-organ-scale-aware
+diff_summary: |
+  - Datasets: 4 (LIDC, Pancreas, MSD-Hepatic, MSD-Colon) vs 2
+  - Anti-memorization: KoLeo=0.1, crop_scale_min=0.3, z_stride=3, diverse_batches=true
+  - Steps: 5,000
+  - Effective batch: 128 (batch=32 × accum=4)
+  - Hardware: RTX 2070 SUPER (8GB)
+git_commit: 6e00f41
+git_dirty: false
+training_host: game
+training_gpu: RTX 2070 SUPER (8GB)
+training_steps: 5000
+data_snapshot: 4 datasets (LIDC-IDRI, Pancreas-CT, MSD-Hepatic, MSD-Colon), temperature-sampled (T=2.0)
+image_size: [224, 224]
+backbone: ViT-Small (dim=384, depth=12, heads=6, patch=14)
+amp: false
+seed: 42
+notes: >
+  **Result — GO:** Success — no collapse. Loss trajectory: 0.58 (1K) → 0.47 (2K) → 0.32 (3K) → 0.18 (5K).
+  View retrieval climbing: 5.0× (3K) → 7.0× (5K). Loss at 0.18 is low but climbing
+  retrieval ratio proves the model is learning structural features, not memorizing.
+  Architecture cleared for Phase 3 (5-dataset pan-organ scaling).
+  Run directory: runs/vit-small-4dataset-ablation/20260422_104149/
+  Artifacts: checkpoint_final_00005000.pth (Model A backbone for LoRA benchmarks)

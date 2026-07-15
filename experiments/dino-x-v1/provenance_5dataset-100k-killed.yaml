@@ -1,0 +1,38 @@
+arm: 5dataset-100k-killed
+hypothesis: >
+  Extending the 5-dataset bs256 pretraining from 50K to 100K steps with a restretched
+  cosine LR schedule (warm restart from 50K) allows ViT-Small to continue improving
+  organ-specific feature quality for LIDC malignancy, closing the 0.026 gap to the
+  4-dataset specialist.
+falsified_if: >
+  LoRA AUROC does NOT improve by ≥ 0.005 vs the 50K bs256 result (0.684) by step 80K,
+  OR entropy collapses below 0.01 before 100K. Effectively: ViT-Small is at absolute
+  capacity ceiling and more steps buy nothing.
+pre_registered_gate: >
+  PASS if LoRA AUROC ≥ 0.700 at step 100K AND view retrieval ratio ≥ 60× AND teacher
+  entropy remains > 0.01. GO-with-caveat if AUROC improves but doesn't reach target.
+differs_from: 5dataset-bs256
+diff_summary: |
+  - Max steps: 100,000 (cosine restretched from 50K — warm restart at midpoint ~1e-4 LR)
+  - Resumed from bs256 step 50K checkpoint
+  - Same architecture, data, and hardware
+  - Extended the cosine schedule rather than re-warming from scratch
+git_commit: e8fc8d1 (start), progressing through multiple resume commits
+git_dirty: true (multiple resume attempts)
+training_host: max395 (Strix Halo)
+training_gpu: AMD Radeon 8060S (~96GB VRAM slice)
+training_steps: 100000
+data_snapshot: 400K slices (same 5-dataset T=2.0 index)
+image_size: [224, 224]
+backbone: ViT-Small (dim=384, depth=12, heads=6, patch=14)
+amp: bfloat16
+notes: >
+  **Result — KILL.** 81K checkpoint showed promise: LoRA AUROC 0.697 (best 5-dataset result),
+  view retrieval 63×. But 86K: catastrophic collapse — teacher entropy 0.001, student entropy
+  0.00018, AUROC plummeted to 0.642. View retrieval at 86K was still 61×, masking the collapse.
+  ViT-Small (22M backbone params) cannot maintain organ-specific feature diversity across 5
+  heterogeneous organ domains under DINO's contrastive pressure. This is a structural capacity
+  ceiling, not a hyperparameter issue — proven by 4 LRs, 2 batch sizes, 6 checkpoints, 5 LoRA
+  interventions all failing to close the gap.
+  Discontinuation notice: docs/DISCONTINUATION_NOTICE_vit-small-100k.md
+  Run directories: runs/20260428_*_5dataset-phase3-small-bs256-100k/ (multiple resume attempts)

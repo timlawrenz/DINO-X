@@ -1,5 +1,14 @@
 # DINO-X: Open-Source Medical Imaging Model Zoo
 
+> 🤖 **AI agents: stop here and read [`AGENTS.md`](AGENTS.md) first.**
+
+## Quick Orientation
+
+- **Current status:** [`PROJECT_STATUS.md`](PROJECT_STATUS.md) — Phase 5 STALLED (ViT-Large memory crash on Strix Halo; resuming with mitigation)
+- **Workstream map:** [`docs/EXPERIMENT_TREE.md`](docs/EXPERIMENT_TREE.md) — active/concluded/TBD with verdict tags
+- **Permanent ledger:** [`docs/EXPERIMENTS_AND_RESULTS.md`](docs/EXPERIMENTS_AND_RESULTS.md) — all empirical findings, pre-registered gates, adversarial pass checklists
+- **Governance:** [`docs/experiment-structure.md`](docs/experiment-structure.md) — how this project implements the scientific experiment structure
+
 DINO-X is an open-source model zoo for medical imaging, training **pan-organ,
 modality-specific** Vision Foundation Models using self-supervised learning. Each
 model is **scale-aware**: it natively understands the physical dimensions of what
@@ -179,13 +188,17 @@ Key design decisions:
 ## Repository Structure
 
 ```
+├── PROJECT_STATUS.md               # Living orientation pointer
+├── AGENTS.md                       # AI agent entry point (mandatory reading order)
 ├── configs/
 │   └── panorgan_ct_vits.yaml      # Staged pan-organ CT training spec
 ├── docs/
-│   ├── EXPERIMENTS.md              # Experiment logs with full results
-│   ├── roadmap.md                  # Phase 1–6 execution plan
-│   ├── hardware_setup.md           # ROCm/platform bootstrap
-│   └── data_preprocessing.md       # DICOM → PNG pipeline details
+│   ├── experiment-structure.md      # Governance: how this project implements the scientific experiment structure
+│   ├── EXPERIMENT_TREE.md           # Living workstream map (active/concluded/TBD)
+│   ├── EXPERIMENTS_AND_RESULTS.md   # Permanent ledger with pre-registered gates + verdicts
+│   ├── roadmap.md                   # Phase 1–6 execution plan
+│   ├── hardware_setup.md            # ROCm/platform bootstrap
+│   └── data_preprocessing.md        # DICOM → PNG pipeline details
 ├── zoo/                            # Model zoo package
 │   ├── arch.py                     # PatchViT + ScaleEmbedding architecture
 │   ├── hub.py                      # Model loading (local / HuggingFace Hub)
@@ -213,11 +226,8 @@ Key design decisions:
 │   │   ├── phase2_tcia_download.py         # TCIA dataset downloader
 │   │   ├── mvp_combine_indices.py          # Multi-dataset index combiner
 │   │   └── extract_dicom_spacing.py        # DICOM spacing metadata extractor
-│   ├── fetch_hf_data.sh            # Download processed data from HuggingFace
 │   └── prep_remote_data.sh         # Cloud data prep pipeline (TCIA → HF)
 ├── tests/                          # 186 tests (zoo, card, publish, data, finetune)
-├── docs/                           # Architecture docs, experiment logs, hardware setup
-│   └── hardware/                   # Hardware info dumps (Strix Halo, ROCm)
 ├── runs/                           # Experiment artifacts (results, configs)
 ├── requirements.in                 # Human-maintained dependencies
 ├── requirements.txt                # Pinned snapshot
@@ -257,5 +267,6 @@ billion-parameter training to enterprise data centers.
 
 > **Status:** Active development. Phases 1–5 infrastructure complete (ScaleEmbedding,
 > data registry, training pipeline, model cards, HF Hub publishing, LoRA fine-tuning).
-> MVP proven with 67× loss improvement on two-organ ablation. Pan-organ scaling
-> (Stage A/B/C) and cross-modality expansion (MRI, X-ray) are next.
+> MVP proven with 67× loss improvement on two-organ ablation. ViT-Small pan-organ
+> capacity saturated; ViT-Large in progress (stalled — see PROJECT_STATUS.md).
+> See [`PROJECT_STATUS.md`](PROJECT_STATUS.md) for current state and next action.

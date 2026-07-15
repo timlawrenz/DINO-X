@@ -1,0 +1,43 @@
+# Frozen canonical config: lora-benchmark-4dataset
+# LIDC malignancy LoRA benchmark on 4-dataset backbone (2026-04-22)
+# This is a RECORD, not the runtime source of truth.
+# Original command: python scripts/finetune_lora.py
+
+backbone: 4-dataset ViT-Small, step 5K
+backbone_path: runs/vit-small-4dataset-ablation/20260422_104149/checkpoint_final_00005000.pth
+
+task: classification
+num_classes: 2
+
+lora_rank: 8
+lora_alpha: 16
+lora_targets: [qkv, proj, fc1, fc2]
+
+freeze:
+  - scale_embedding
+  - patch_embed
+  - positional_embeddings
+  - registers
+
+train_csv: /mnt/nas-ai-models/training-data/dino-x/lidc-idri/labels/malignancy_train.csv
+val_csv: /mnt/nas-ai-models/training-data/dino-x/lidc-idri/labels/malignancy_val.csv
+
+crop_size: 64
+hu_window_level: -30
+hu_window_width: 120
+real_hu_window: [-300, 1200]
+
+epochs: 50
+batch_size: 32
+lr: 5.0e-4
+early_stopping_metric: auroc
+patience: 10
+
+seed: 42
+
+data_snapshot:
+  train: 1300 nodules
+  val: 262 nodules
+  test: 315 nodules
+  source: pylidc, consensus ≥ 3 raters, malignancy threshold=3
+  split: patient-stratified 70/13/17

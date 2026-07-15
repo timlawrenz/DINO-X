@@ -1,0 +1,36 @@
+# Frozen canonical config: lora-benchmark-5dataset
+# LoRA benchmark: 5-dataset vs 4-dataset backbone (2026-04-23)
+# This is a RECORD, not the runtime source of truth.
+
+backbone: 5-dataset ViT-Small bs128
+backbone_checkpoints:
+  - step_10000: runs/20260422_202622_5dataset-phase3-small/
+  - step_25000: runs/20260422_202622_5dataset-phase3-small/
+  - step_50000: runs/20260422_202622_5dataset-phase3-small/
+
+task: classification
+num_classes: 2
+
+lora_rank: 8
+lora_alpha: 16
+lora_targets: [qkv, proj, fc1, fc2]
+
+crop_size: 64
+hu_window_level: -30
+hu_window_width: 120
+
+epochs: 50
+batch_size: 32
+lr_sweep: [1.0e-4, 2.0e-4, 5.0e-4, 1.0e-3]
+early_stopping_metric: auroc
+patience: 10
+
+data_snapshot:
+  train: 1300 nodules
+  val: 262 nodules
+  test: 315 nodules
+  source: pylidc, consensus ≥ 3 raters, malignancy threshold=3
+
+comparison_baseline:
+  arm: lora-benchmark-4dataset
+  auroc: 0.710

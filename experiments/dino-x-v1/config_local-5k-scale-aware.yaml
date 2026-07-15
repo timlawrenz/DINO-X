@@ -1,0 +1,39 @@
+# Frozen canonical config: local-5k-scale-aware
+# Local 5K-step scale-aware validation (2026-04-21)
+# This is a RECORD, not the runtime source of truth.
+
+architecture: vit-small
+vit_patch: 14
+vit_dim: 384
+vit_depth: 12
+vit_heads: 6
+num_registers: 4
+scale_aware: true
+
+batch_size: 8
+accumulation_steps: 4
+effective_batch: 32
+
+lr: 2.0e-4
+min_lr: 1.0e-6
+warmup_steps: 500
+max_steps: 5000
+optimizer: adamw
+
+loss_dino: true
+loss_gram: 1.0
+loss_koleo: 0.1
+
+ema_decay: 0.996
+teacher_temp: 0.04
+student_temp: 0.1
+center_momentum: 0.9
+
+img_size: 224
+amp: false
+seed: 42
+
+datasets:
+  - lidc-idri: lung
+  - pancreas-ct: abdomen
+val_slices: 3843

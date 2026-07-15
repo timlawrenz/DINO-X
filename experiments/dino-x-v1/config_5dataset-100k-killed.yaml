@@ -1,0 +1,44 @@
+# Frozen canonical config: 5dataset-100k-killed
+# ViT-Small 100K extended pretraining — KILLED at 86K (2026-04-27 to 2026-05-10)
+# This is a RECORD, not the runtime source of truth.
+
+architecture: vit-small
+vit_patch: 14
+vit_dim: 384
+vit_depth: 12
+vit_heads: 6
+scale_aware: true
+
+batch_size: 64
+accumulation_steps: 4
+effective_batch: 256
+
+lr: 2.0e-4
+min_lr: 1.0e-6
+warmup_steps: 2500
+max_steps: 100000
+optimizer: adamw
+
+loss_dino: true
+loss_gram: 1.0
+loss_koleo: 0.1
+
+crop_scale_min: 0.3
+z_stride: 3
+diverse_batches: true
+
+img_size: 224
+amp: bfloat16
+
+resume_from: 5dataset-bs256 step 50,000
+cosine_restretch: warm restart from LR midpoint (~1e-4)
+
+datasets: same as 5dataset-bs256 (T=2.0, combined_5dataset_t2.csv)
+
+verdict: KILL
+kill_reason: Catastrophic feature collapse at 86K steps
+collapse_metrics:
+  teacher_entropy: 0.001
+  student_entropy: 0.00018
+  lora_auroc: 0.642 (down from 0.697 at 81K)
+best_checkpoint: step 81,000 (AUROC 0.697, view retrieval 63x)

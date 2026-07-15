@@ -1,0 +1,39 @@
+arm: 5dataset-bs128
+hypothesis: >
+  A ViT-Small trained on 5 pan-organ CT datasets (400K slices, 4 organs) with
+  temperature-scaled sampling (T=2.0) and all anti-memorization constraints active
+  can learn general-purpose representations that generalize across heterogeneous
+  organ domains, as measured by view retrieval.
+falsified_if: >
+  View retrieval ratio drops below 5.0× at any checkpoint, OR NaN/Inf events
+  occur, OR Entropy collapses to near-zero before 50K steps. Effectively: the
+  model cannot handle 5 domains without collapsing.
+pre_registered_gate: >
+  PASS if view retrieval ratio ≥ 10.0× at step 50,000 AND no NaN events
+  AND embedding stddev > 0 AND Gram mean < 1.0 (no collapse).
+differs_from: 4dataset-ablation
+diff_summary: |
+  - Datasets: 5 (LIDC, Pancreas, CQ500 brain, MSD-Hepatic, MSD-Colon) vs 4
+  - Total slices: 400K (T=2.0 sampled)
+  - Steps: 50,000 (~53 epochs)
+  - Effective batch: 128 (batch=32 × accum=4)
+  - AMP: bfloat16 (no grad scaler)
+  - Hardware: AMD Radeon 8060S (Strix Halo), ROCm 7.11
+  - LR schedule: cosine 2e-4 → 1e-6, warmup=2,500
+git_commit: 20ee253
+git_dirty: false
+training_host: max395 (Strix Halo)
+training_gpu: AMD Radeon 8060S (~96GB VRAM slice)
+training_steps: 50000
+data_snapshot: 400,070 slices, 5 datasets, 4 organs, temperature-sampled (T=2.0)
+image_size: [224, 224]
+backbone: ViT-Small (dim=384, depth=12, heads=6, patch=14, ~70.2M with projector)
+amp: bfloat16
+seed: 42
+notes: >
+  **Result — GO:** Training stable. View retrieval 56× at 50K. Throughput ~390 samples/s,
+  total ~4.8 hours. Temperature-scaled sampling balanced organ representation (LIDC down-weighted,
+  minorities up-weighted). Loss trajectory: 8.78 (init) → 6.81 (1K) → 3.32 (2K) → ~2.0 (5K).
+  No NaN events. Entropy healthy at 5K. First successful pan-organ pretraining.
+  Run directory: runs/20260422_202622_5dataset-phase3-small/
+  Data manifest hash: 817d2641b44806db

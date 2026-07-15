@@ -1,0 +1,35 @@
+arm: eval-protocol-validation
+hypothesis: >
+  The 6-metric pan-organ evaluation suite (scripts/evaluate_panorgan.py) can run
+  end-to-end on locally trained checkpoints without errors, and the ScaleEmbedding
+  shows measurable advantage even at 1,000 training steps.
+falsified_if: >
+  Any metric produces errors/NaNs/empty output, OR ScaleEmbedding shows zero
+  advantage over baseline on every metric (R²≈0, identical dataset discrimination,
+  zero spacing counterfactual distance).
+pre_registered_gate: >
+  PASS if all 6 metrics execute without errors AND ScaleEmbedding achieves AUC ≥ 0.90
+  for dataset discrimination AND spacing R² > 0.5.
+differs_from: two-organ-scale-aware
+diff_summary: |
+  - This arm validates the EVALUATION pipeline, not the training pipeline
+  - Reduced steps (1,000) and smaller batch (eff=64) for rapid validation
+  - Uses scripts/evaluate_panorgan.py with 6 metrics (view retrieval, dataset discrimination, spacing counterfactual, domain clustering, spacing prediction, embedding statistics)
+git_commit: 984d229506f10a4b79fe901a1b1576e5897b51c9
+git_dirty: false
+training_host: game
+training_gpu: RTX 2070 SUPER (8GB)
+training_steps: 1000
+data_snapshot: 4,035 validation slices (LIDC-IDRI + Pancreas-CT)
+image_size: [224, 224]
+backbone: ViT-Small (dim=384, depth=12, heads=6, patch=14)
+amp: fp16
+seed: 42
+notes: >
+  **Result — GO:** All 6 metrics ran successfully (~65s on RTX 2070 SUPER).
+  Scale-aware: AUC=1.000 (dataset discrimination), R²=0.724 (spacing prediction),
+  PCA1-spacing corr=0.993 (Pancreas). Baseline: AUC=0.880, R²=-0.005.
+  Counterfactual distances small at 1K steps (expected — ScaleEmbedding zero-init ramp-up).
+  Eval protocol validated end-to-end.
+  Run directory: runs/eval_validation/
+  Artifacts: runs/eval_validation/baseline_eval.json, runs/eval_validation/scale_aware_eval.json

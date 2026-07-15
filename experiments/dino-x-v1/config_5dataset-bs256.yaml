@@ -1,0 +1,34 @@
+# Frozen canonical config: 5dataset-bs256
+# 5-dataset doubled batch size (2026-04-26)
+# This is a RECORD, not the runtime source of truth.
+
+architecture: vit-small
+vit_patch: 14
+vit_dim: 384
+vit_depth: 12
+vit_heads: 6
+scale_aware: true
+
+batch_size: 64
+accumulation_steps: 4
+effective_batch: 256
+
+lr: 2.0e-4
+min_lr: 1.0e-6
+warmup_steps: 2500
+max_steps: 50000
+optimizer: adamw
+
+loss_dino: true
+loss_gram: 1.0
+loss_koleo: 0.1
+
+crop_scale_min: 0.3
+z_stride: 3
+diverse_batches: true
+
+img_size: 224
+amp: bfloat16
+
+datasets: same as 5dataset-bs128 (T=2.0 temperature sampling)
+resume_from: 5dataset-bs128 step 40,338

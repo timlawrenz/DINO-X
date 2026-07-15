@@ -1,0 +1,35 @@
+arm: two-organ-baseline
+hypothesis: >
+  A standard ViT-Small without ScaleEmbedding, trained with DINO + Gram + KoLeo
+  on multi-organ CT data, serves as a baseline for evaluating whether the
+  ScaleEmbedding provides any learning benefit beyond what the standard architecture
+  achieves.
+falsified_if: >
+  The scale-aware arm does NOT improve DINO loss by ≥50% vs this baseline,
+  OR view retrieval ratio of scale-aware arm drops below this baseline.
+  Effectively: the baseline already breaks through the entropy wall and
+  ScaleEmbedding is unnecessary.
+pre_registered_gate: >
+  PASS if loss < ln(8192)=9.01 (breaks entropy wall) AND view retrieval ratio > 1.0x
+  random AND no feature collapse. This arm is the floor — the scale-aware arm must
+  beat it.
+differs_from: null
+diff_summary: |
+  - scale_aware: false (no ScaleEmbedding — standard ViT-Small)
+  - Hardware: RTX 3090 Ti
+git_commit: e50f3b278af7327e28f88a94b7b335dd69828304
+git_dirty: false
+training_host: vast.ai (RTX 3090 Ti instance)
+training_gpu: RTX 3090 Ti (24GB)
+training_steps: 5000
+data_snapshot: 43,383 slices (LIDC-IDRI 24,441 + Pancreas-CT 18,942), 180 series, 2 organs
+image_size: [224, 224]
+backbone: ViT-Small (dim=384, depth=12, heads=6, patch=14, ~70.2M with projector)
+amp: fp16
+seed: 42
+notes: >
+  **Result — GO:** loss=8.992 (stuck at entropy wall — ln(8192)=9.01).
+  View retrieval 5.0x random. Both health monitors green (Embed-L0 std=0.034, Output Gram=0.9996).
+  Training time: 33.4 min. Cost: ~$0.04.
+  Run directory: runs/mvp-two-organ/
+  Artifacts: runs/mvp-two-organ/baseline_{train.log,retrieval.json,config.json}

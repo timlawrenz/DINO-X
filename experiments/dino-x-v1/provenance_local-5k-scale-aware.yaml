@@ -1,0 +1,38 @@
+arm: local-5k-scale-aware
+hypothesis: >
+  The two-organ scale-aware training result (loss=0.134 on RTX 5070, eff batch=256)
+  can be reproduced on consumer hardware (RTX 2070 SUPER, 8GB VRAM) with a smaller
+  effective batch, and the full 6-metric evaluation protocol will show stronger
+  ScaleEmbedding effects at 5K steps vs 1K steps.
+falsified_if: >
+  View retrieval ratio does NOT exceed 5.0x (the 1K-step result), OR spacing R²
+  does NOT exceed 0.5, OR spacing counterfactual distance does NOT increase vs the
+  1K-step model. Effectively: more training steps do not improve scale encoding.
+pre_registered_gate: >
+  PASS if view retrieval ratio ≥ 5.0x on at least one dataset AND spacing R² ≥ 0.7
+  AND spacing counterfactual distance > 10× the 1K-step values.
+differs_from: two-organ-scale-aware
+diff_summary: |
+  - Effective batch: 32 (batch=8 × accum=4) vs cloud's 256
+  - Hardware: RTX 2070 SUPER (8GB) vs RTX 5070 (12GB)
+  - AMP: disabled (batch=8 fits in 8GB)
+  - Steps: 5,000 micro-batches (1,250 optimizer updates) — identical optimizer schedule to cloud run
+  - Fixed gradient accumulation step counting bug: cloud used accum=4, prior local runs used accum=32, causing LR schedule compression
+git_commit: 984d229506f10a4b79fe901a1b1576e5897b51c9
+git_dirty: false
+training_host: game
+training_gpu: RTX 2070 SUPER (8GB)
+training_steps: 5000
+data_snapshot: 3,843 validation slices (LIDC-IDRI + Pancreas-CT)
+image_size: [224, 224]
+backbone: ViT-Small (dim=384, depth=12, heads=6, patch=14, ~21.7M backbone params)
+amp: false
+seed: 42
+notes: >
+  **Result — GO:** loss=1.03 (higher than cloud's 0.134 due to smaller batch),
+  but evaluation metrics strong. View retrieval 14× LIDC, spacing R²=0.876,
+  cross-centroid cosine 0.164 (genuinely distinct organ embeddings), 184× spacing
+  sensitivity improvement vs 1K-step model. Training time: 733s (~12 min) at 218 samples/s.
+  Scale awareness validated end-to-end on consumer hardware.
+  Run directory: runs/v1-local-5k/20260421_202330/
+  Artifacts: checkpoint_final_00005000.pth, eval_5k.json, hub-export/

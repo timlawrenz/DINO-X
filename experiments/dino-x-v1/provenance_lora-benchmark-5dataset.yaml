@@ -1,0 +1,39 @@
+arm: lora-benchmark-5dataset
+hypothesis: >
+  Adding CQ500 brain CTs (5-dataset pan-organ pretraining) improves general-purpose
+  representations (view retrieval) but may degrade organ-specific downstream performance
+  (LIDC malignancy LoRA AUROC) vs the 4-dataset lung-focused backbone due to capacity
+  dilution — ViT-Small's 22M params spread across more domains.
+falsified_if: >
+  5-dataset LoRA AUROC equals or exceeds 4-dataset AUROC (0.710) on LIDC malignancy,
+  i.e., adding brain CTs does NOT harm lung-specific features. OR: view retrieval
+  ratio does NOT increase vs 4-dataset backbone. Effectively: either capacity dilution
+  is not real, or 5-dataset training provides no representational benefit.
+pre_registered_gate: >
+  PASS if view retrieval ratio > 10× (confirming improved generality) AND we characterize
+  the LoRA AUROC gap vs 4-dataset specialist (expected: measurable gap confirming dilution).
+differs_from: lora-benchmark-4dataset
+diff_summary: |
+  - Backbone: 5-dataset bs128 checkpoints (10K, 25K, 50K) vs 4-dataset 5K
+  - LR sweep: 1e-4, 2e-4, 5e-4, 1e-3
+  - Same LoRA protocol otherwise
+git_commit: 20ee253 (from backbone)
+git_dirty: false
+training_host: game
+training_gpu: RTX 2070 SUPER (8GB)
+training_epochs: 50
+data_snapshot: 1,300 train / 262 val / 315 test LIDC-IDRI nodules
+image_size: [64, 64]
+backbone: ViT-Small (frozen, 5-dataset bs128, at multiple checkpoints)
+lora_rank: 8
+lora_alpha: 16
+lr: [1.0e-4, 2.0e-4, 5.0e-4, 1.0e-3]
+early_stopping_metric: val_auroc
+patience: 10
+notes: >
+  **Result — GO:** Capacity dilution confirmed. 5-dataset best AUROC=0.680 (50K, lr=1e-3) vs
+  4-dataset 0.710. View retrieval 56× (5-dataset) vs 7× (4-dataset) — dramatically better
+  general representations but worse organ-specific features. Checkpoint sweep: 10K (0.672) > 25K
+  (0.639) > 50K (0.635) at default lr=5e-4 — more training steps degraded lung-specific features.
+  LR matters but doesn't close the 3% gap. Effective batch 128 noted as sub-DINO-recommended (≥256).
+  Adapters: adapters/lidc-malignancy-5dataset-{step10000,step25000,step50000,50k-lr1e-3,...}/

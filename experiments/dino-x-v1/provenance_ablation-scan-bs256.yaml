@@ -1,0 +1,38 @@
+arm: ablation-scan-bs256
+hypothesis: >
+  LoRA-side interventions — higher rank (16, 32), partial unfreezing (1 transformer block),
+  and larger crop size (128px) — can close the 0.026 AUROC gap between the 5-dataset bs256
+  backbone (0.684) and the 4-dataset lung specialist (0.710) on LIDC malignancy classification.
+falsified_if: >
+  No intervention achieves val AUROC ≥ 0.700 (closing at least half the gap), AND all
+  interventions perform worse or equal to the seeded baseline (0.668). Effectively:
+  the gap is purely a backbone representation issue, not a LoRA tuning issue.
+pre_registered_gate: >
+  PASS if ANY intervention achieves AUROC ≥ 0.700. FAIL if ALL interventions ≤ baseline
+  (0.668). Characterize which interventions help vs hurt.
+differs_from: lora-benchmark-5dataset
+diff_summary: |
+  - Backbone: 5-dataset bs256 50K checkpoint (vs bs128)
+  - Variants: rank 8 (baseline), rank 16, rank 32, unfreeze 1 block (rank 8), 128px crops (rank 8)
+  - Seeded: --seed 42 for reproducibility (vs prior unseeded runs)
+  - Script: scripts/ablation_5dataset_bs256.sh
+git_commit: e8fc8d1 (from backbone)
+git_dirty: false
+training_host: game
+training_gpu: RTX 2070 SUPER (8GB)
+training_epochs: 50
+data_snapshot: 1,300 train / 262 val LIDC-IDRI nodules (64px or 128px crops)
+image_size: [64, 64]
+backbone: ViT-Small (frozen, 5-dataset bs256, step 50K)
+lora_rank: [8, 16, 32]
+seed: 42
+notes: >
+  **Result — GO:** No LoRA-side intervention bridges the 0.026 gap to 4-dataset model.
+  Rank 16: 0.685 AUROC (+0.017 over seeded baseline 0.668) — only positive signal but
+  matches unseeded baseline (0.684) within noise. Rank 32: 0.670 (overfits — more params
+  than 1300 training samples can support). Unfreeze 1 block: 0.659 (-0.009 — 1.77M params
+  destabilize pretrained representations on small dataset). 128px crops: 0.589 (-0.079 —
+  confirms prior 4-dataset result, fundamental task property). Run-to-run variance ~0.016
+  (seeded vs unseeded) — differences <0.02 not statistically meaningful with 262 val samples.
+  The gap is structural: backbone capacity, not LoRA tuning.
+  Adapters: adapters/ablation-5dataset-bs256-{baseline-r8,r16,r32,unfreeze1,crop128}-seed42/

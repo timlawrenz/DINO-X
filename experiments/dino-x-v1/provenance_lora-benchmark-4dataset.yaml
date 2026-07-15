@@ -1,0 +1,41 @@
+arm: lora-benchmark-4dataset
+hypothesis: >
+  A frozen 4-dataset DINO-X backbone (ViT-Small, 5K steps) fine-tuned with LoRA
+  (rank=8) for LIDC-IDRI nodule malignancy classification can beat the linear probe
+  baseline (AUROC 0.687) and approach the supervised ResNet18 literature baseline
+  (0.767), proving the backbone's representations are useful for downstream tasks.
+falsified_if: >
+  LoRA AUROC does NOT exceed 0.687 (linear probe baseline), OR 128px/224px crops
+  match or exceed 64px crop performance. Effectively: either no advantage over
+  linear probe, or crop size doesn't matter (invalidating the task framing).
+pre_registered_gate: >
+  PASS if best val AUROC > 0.687 (beat linear probe) AND 64px crops outperform
+  128px+ crops by ≥ 2%.
+differs_from: null
+diff_summary: |
+  - Task: LIDC-IDRI nodule malignancy binary classification (threshold=3)
+  - LoRA: rank=8, alpha=16, targets=qkv+proj+fc1+fc2
+  - Data: 1300 train / 262 val / 315 test (patient-stratified)
+  - Crops: nodule-centered bounding box, 2× padding
+  - Backbone: 4-dataset ViT-Small, step 5K (from 4dataset-ablation arm)
+  - Frozen: ScaleEmbedding, PatchEmbed, positional embeddings, registers
+git_commit: ~6e00f41 (from backbone)
+git_dirty: false
+training_host: game
+training_gpu: RTX 2070 SUPER (8GB)
+training_epochs: 50
+data_snapshot: 1,300 train / 262 val / 315 test LIDC-IDRI nodules, consensus ≥ 3 raters
+image_size: [64, 64]
+backbone: ViT-Small (frozen, 4-dataset 5K-step, from 4dataset-ablation arm)
+lora_rank: 8
+lora_alpha: 16
+lora_targets: [qkv, proj, fc1, fc2]
+lr: 5.0e-4
+early_stopping_metric: val_auroc
+patience: 10
+seed: 42
+notes: >
+  **Result — GO:** Best config achieved val AUROC 0.710 (64px crops, lung HU window, lr=5e-4).
+  Beats linear probe baseline (0.687). Key findings: crop size dominates (64px >> 128px >> 224px),
+  lung HU window adds +3% vs generic window. Patient-level test AUROC: 0.706.
+  Adapter: adapters/lidc-malignancy-lora-r8-64px-lung-window/

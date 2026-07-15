@@ -1,0 +1,44 @@
+# Frozen canonical config: 4dataset-ablation
+# 4-dataset anti-memorization ablation (2026-04-22)
+# This is a RECORD, not the runtime source of truth.
+
+architecture: vit-small
+vit_patch: 14
+vit_dim: 384
+vit_depth: 12
+vit_heads: 6
+scale_aware: true
+
+batch_size: 32
+accumulation_steps: 4
+effective_batch: 128
+
+lr: 2.0e-4
+min_lr: 1.0e-6
+warmup_steps: 500
+max_steps: 5000
+optimizer: adamw
+
+loss_dino: true
+loss_gram: 1.0
+loss_koleo: 0.1
+
+ema_decay: 0.996
+teacher_temp: 0.04
+student_temp: 0.1
+center_momentum: 0.9
+
+crop_scale_min: 0.3
+z_stride: 3
+diverse_batches: true
+
+img_size: 224
+amp: false
+seed: 42
+
+datasets:
+  - lidc-idri
+  - pancreas-ct
+  - msd-hepatic
+  - msd-colon
+sampling: temperature (T=2.0)

@@ -1,0 +1,33 @@
+arm: 5dataset-bs256
+hypothesis: >
+  Doubling the effective batch size from 128 to 256 (the DINO paper's recommended
+  minimum) improves representation quality for the 5-dataset pan-organ corpus by
+  providing more stable teacher centering and richer contrastive comparisons per step.
+falsified_if: >
+  LoRA AUROC on LIDC malignancy does NOT improve vs bs128 (0.680), AND view retrieval
+  ratio does NOT improve vs bs128 (56×). Effectively: batch size doubling is unnecessary
+  overhead with no benefit.
+pre_registered_gate: >
+  PASS if view retrieval ratio ≥ 56× (match bs128) AND LoRA AUROC ≥ 0.680 (match bs128).
+  Secondary success: if either metric improves.
+differs_from: 5dataset-bs128
+diff_summary: |
+  - Effective batch: 256 (batch=64 × accum=4) vs 128 (batch=32 × accum=4)
+  - Resumed from bs128 step ~40K → 50K (cosine continues from bs128 schedule)
+  - Teacher centering and KoLeo see 64 samples per micro-batch (vs 32)
+git_commit: e8fc8d1
+git_dirty: false
+training_host: max395 (Strix Halo)
+training_gpu: AMD Radeon 8060S (~96GB VRAM slice)
+training_steps: 50000
+data_snapshot: 400K slices (same 5-dataset T=2.0 index as bs128)
+image_size: [224, 224]
+backbone: ViT-Small (dim=384, depth=12, heads=6, patch=14)
+amp: bfloat16
+notes: >
+  **Result — GO:** Doubling batch did not close the gap. View retrieval 54× (vs 56× for bs128),
+  LoRA AUROC 0.684 (vs 0.680 for bs128). Loss plateaued at ~35K — cosine LR hit floor and loss
+  stopped improving. Teacher entropy collapsed progressively (0.026 at 40-50K, 21% samples below 0.01)
+  — collapsed MORE than bs128. Grad norm stabilized late (early spikes 7.3B, settled to median 8.4).
+  Key insight: later checkpoints better for LoRA (opposite to bs128), suggesting more stable features.
+  Run directory: runs/20260423_171906_5dataset-phase3-small-bs256/

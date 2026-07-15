@@ -1,0 +1,34 @@
+arm: two-organ-scale-aware
+hypothesis: >
+  ScaleEmbedding — a lightweight MLP that projects DICOM physical spacing metadata
+  into the patch embedding space — breaks through the DINO entropy wall (ln(8192)=9.01)
+  on multi-organ CT data, enabling dramatically lower DINO loss and richer learned
+  representations.
+falsified_if: >
+  Final DINO loss does NOT drop below 5.0 after 5,000 steps, OR view retrieval ratio
+  drops below the baseline arm's ratio. Effectively: the entropy wall holds and
+  ScaleEmbedding adds no learning signal beyond what the baseline achieves.
+pre_registered_gate: >
+  PASS if final loss < 5.0 AND view retrieval ratio ≥ baseline arm's ratio AND
+  no feature collapse (Embed-L0 std > 0, Output Gram mean < 1.0).
+differs_from: two-organ-baseline
+diff_summary: |
+  - scale_aware: true (ScaleEmbedding active — 3-dim spacing → MLP → patch embedding add)
+  - Hardware: RTX 5070 (vs RTX 3090 Ti for baseline)
+git_commit: e50f3b278af7327e28f88a94b7b335dd69828304
+git_dirty: false
+training_host: vast.ai (RTX 5070 instance)
+training_gpu: RTX 5070 (12GB)
+training_steps: 5000
+data_snapshot: 43,383 slices (LIDC-IDRI 24,441 + Pancreas-CT 18,942), 180 series, 2 organs
+image_size: [224, 224]
+backbone: ViT-Small (dim=384, depth=12, heads=6, patch=14, ~70.2M with projector)
+amp: fp16
+seed: 42
+notes: >
+  **Result — GO:** loss=0.134 (67x lower than baseline 8.992). View retrieval 4.0x random.
+  Both health monitors green (Embed-L0 std=0.065, Output Gram=0.995).
+  ScaleEmbedding definitively breaks DINO entropy wall.
+  Training time: 62.8 min. Cost: ~$0.01.
+  Run directory: runs/mvp-two-organ/
+  Artifacts: runs/mvp-two-organ/scale_aware_{train.log,retrieval.json,config.json}

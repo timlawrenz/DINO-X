@@ -1,0 +1,42 @@
+# Frozen canonical config: eval-protocol-validation
+# 6-metric eval protocol validation (2026-04-21)
+# This is a RECORD, not the runtime source of truth.
+
+architecture: vit-small
+vit_patch: 14
+vit_dim: 384
+vit_depth: 12
+vit_heads: 6
+scale_aware: [false, true]  # Two arms: baseline + scale-aware
+
+batch_size: 16
+accumulation_steps: 4
+effective_batch: 64
+
+lr: 2.0e-4
+warmup_steps: 100
+max_steps: 1000
+optimizer: adamw
+
+loss_dino: true
+loss_gram: 1.0
+loss_koleo: 0.1
+
+img_size: 224
+amp: fp16
+seed: 42
+
+datasets:
+  - lidc-idri
+  - pancreas-ct
+val_slices: 4035
+
+evaluation:
+  script: scripts/evaluate_panorgan.py
+  metrics:
+    - per_dataset_view_retrieval
+    - dataset_discrimination_linear_probe
+    - spacing_counterfactual_test
+    - domain_clustering
+    - spacing_prediction_sanity_check
+    - embedding_statistics

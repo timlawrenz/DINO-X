@@ -1,0 +1,50 @@
+# Frozen canonical config: ablation-scan-bs256
+# 5-dataset LoRA ablation scan (2026-04-27)
+# This is a RECORD, not the runtime source of truth.
+
+backbone: 5-dataset ViT-Small bs256, step 50K
+backbone_path: runs/20260423_171906_5dataset-phase3-small-bs256/checkpoint_final_00050000.pth
+
+task: classification
+num_classes: 2
+
+lora_alpha: 16
+lora_targets: [qkv, proj, fc1, fc2]
+
+variants:
+  - name: baseline-r8
+    lora_rank: 8
+    unfreeze_blocks: 0
+    crop_size: 64
+  - name: r16
+    lora_rank: 16
+    unfreeze_blocks: 0
+    crop_size: 64
+  - name: r32
+    lora_rank: 32
+    unfreeze_blocks: 0
+    crop_size: 64
+  - name: unfreeze1
+    lora_rank: 8
+    unfreeze_blocks: 1
+    crop_size: 64
+  - name: crop128
+    lora_rank: 8
+    unfreeze_blocks: 0
+    crop_size: 128
+
+crop_size_nodule: 64
+hu_window_level: -30
+hu_window_width: 120
+
+epochs: 50
+batch_size: 32
+lr: 5.0e-4
+early_stopping_metric: auroc
+patience: 10
+seed: 42
+
+data_snapshot:
+  train: 1300 nodules
+  val: 262 nodules
+  source: pylidc, consensus ≥ 3 raters, malignancy threshold=3
