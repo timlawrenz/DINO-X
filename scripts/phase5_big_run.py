@@ -200,6 +200,15 @@ MODEL_CONFIGS = {
         mlp_ratio=4.0,
         out_dim=8192,
     ),
+    "vit-base": ModelConfig(
+        name="vit-base",
+        patch=14,
+        dim=768,
+        depth=12,
+        heads=12,
+        mlp_ratio=4.0,
+        out_dim=8192,
+    ),
     "vit-large": ModelConfig(
         name="vit-large",
         patch=14,
