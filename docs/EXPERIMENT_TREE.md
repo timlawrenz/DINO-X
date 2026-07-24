@@ -6,13 +6,21 @@ Living workstream map — status tags: `[ACTIVE]`, `[CONCLUDED]`, `[TBD]`. Evide
 
 ## Active
 
-- **[CONCLUDED — PIVOT] LIDC Single-Organ ViT-Base Specialist** (`lidc-specialist-vit-base-scale-aware`)
-  - ViT-Base (86M), LIDC-only, scale-aware. Completed 50K in 12.5h at 289 samples/s.
-  - **LoRA AUROC 0.728** (PASS vs 0.720 gate) — best malignancy result in project.
-  - **View retrieval 37×** (FAIL vs 40× gate) — gap traced to DINO final-layer spatial correspondence destruction (arXiv:2604.23670 validated). Layer selection recovers 31→37×. Added `--vit-layer` to eval script.
-  - **Lesson:** Single-organ specialist eliminates capacity dilution; view retrieval and AUROC are decoupled for LIDC.
+_No active experiments._
 
 ## Concluded
+
+- **[CONCLUDED — PIVOT] Replace View Retrieval Gate for Single-Organ Models** (`replace-view-retrieval-gate`)
+  - Tested spacing metrics as replacement gates on LIDC specialist (known good AUROC 0.728).
+  - Failed targets (counterfactual 0.239 < 0.30, R² 0.941 < 0.95). Single datasets lack spacing variance to drive scale embeddings to pan-organ levels.
+  - **Verdict:** Spacing gates invalid for single datasets. View retrieval invalid (architecture handicapped).
+  - **New Governance:** Single-organ models gated **solely by LoRA AUROC** vs baseline.
+
+- **[CONCLUDED — KILL] Positional Bias Projection for View Retrieval** (`positional-bias-projection`)
+  - Noise-image PCA bias projection applied to layer 9 features on 50K checkpoint.
+  - Result: **37×** — identical to layer 9 without bias projection. No improvement.
+  - Hypothesis that DINO positional artifact degrades CLS-token view retrieval was disproven for LIDC CT.
+  - Added `--pos-bias-project` flag to eval script.
 
 - **[CONCLUDED — KILL] Phase 5: ViT-Large Pan-Organ Pretraining** (`runs/20260719_042301_5dataset-phase5-large-bs256-v2/`)
   - 5-dataset pan-organ corpus (400K slices), ViT-Large (923M params), effective batch 256
@@ -71,11 +79,11 @@ Living workstream map — status tags: `[ACTIVE]`, `[CONCLUDED]`, `[TBD]`. Evide
 
 ## TBD
 
-- **[TBD] Resume ViT-Large Pan-Organ** — memory mitigation + validation. See PROJECT_STATUS.md.
-- **[TBD] ViT-Base Pan-Organ** — intermediate scaling step if ViT-Large proves unstable.
+- **[TBD] Positional Bias Projection for View Retrieval** — apply arXiv:2604.23670 null-space projection to push view retrieval from 37× past the 40× gate on the existing 50K checkpoint. Low risk, evaluation-only change.
+- **[TBD] Replace View Retrieval Gate for Single-Organ Models** — layer-selection confirmed view retrieval is architecture-handicapped (31→37×). Use pan-organ metrics (spacing counterfactual, dataset discrimination) or LoRA AUROC as the primary gate for single-organ specialists.
+- **[TBD] Scale LIDC Recipe to Other Organs** — apply the proven ViT-Base + scale-aware + single-organ recipe to cq500 (brain), pancreas-ct, msd-colon, msd-hepatic-vessel. Baseline AUROC 0.728 on LIDC shows the approach works.
+- **[TBD] Fix `--ckpt-keep-last` Default** — change from 5 to 0 (keep all) or 10 to prevent checkpoint rotation from destroying intermediate evaluation points (lost 25K in Phase 6).
+- **[TBD] Many-to-Many View Retrieval Matching** — relax 1-to-1 nearest neighbor to top-K mutual neighbors (arXiv:2604.23670) in `phase5_view_retrieval_eval.py`.
 - **[TBD] Cross-Modality Expansion** — MRI (`dinox-mri-vit-small`) and X-ray (`dinox-xray-vit-small`) models.
-- **[TBD] Attention Map Evaluation** — unsupervised nodule segmentation from attention maps.
-- **[TBD] Linear Probe AUC > 0.90** — on LIDC malignancy (Stage C evaluation).
-- **[TBD] Per-Class Accuracy Logging** — needed for rare-class recall evaluation.
 - **[TBD] HF Hub Release** — publish `dinox-ct-vit-small-v1` model card + safetensors.
 - **[TBD] Adversarial Pass Retrospective** — audit all GO verdicts against the 4-question checklist.

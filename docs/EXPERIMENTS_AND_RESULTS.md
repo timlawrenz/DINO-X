@@ -155,6 +155,77 @@ The ViT-Large pan-organ KILL confirmed capacity dilution as the primary failure 
 
 ---
 
+## Phase 7: Positional Bias Projection for View Retrieval — `[ACTIVE]`
+
+**Date:** 2026-07-24
+**Arm:** `positional-bias-projection` · Git commit: `22f0e5d`
+**Goal:** Validate arXiv:2604.23670's finding that DINO features contain a stable positional artifact. Project features onto the null space of this bias and measure view retrieval improvement on the Phase 6 50K checkpoint.
+**Pre-registered gate:** PASS if view retrieval ≥ 40× with `--vit-layer 9 --pos-bias-project`. FAIL if ratio ≤ 37× (no improvement over layer 9 alone).
+
+### Design
+
+- **Method:** PCA on noise-image activations to find positional bias direction. Project test features orthogonally: `f' = f - (f·v)v`.
+- **Checkpoint:** Phase 6 50K ViT-Base (LIDC-only, AUROC 0.728, layer 9: 37×)
+- **Evaluation:** `--vit-layer 9 --pos-bias-project --n 512`
+- **Comparison:** Layer 9 alone (37×), default (31×)
+
+### Empirical Evidence
+
+**Run 2026-07-24 on max395.** Positional bias direction computed from noise image — 768-dim vector (ViT-Base dim). Bias projection applied to 50K checkpoint embeddings at layer 9.
+
+**Result:** View retrieval **37×** — identical to layer 9 without bias projection (37×). No improvement. Bias direction computed (shape [768, 1]), null-space projection applied, zero retrieval gain. Eval time: 105.6s.
+
+**Interpretation:** Either the CLS token doesn't carry the patch-level positional artifact, single-sample PCA is too weak, or the bias is negligible on LIDC CT.
+
+### Verdict
+
+**KILL.** FAIL (37× vs 40× gate). Positional bias projection does not improve view retrieval on LIDC CT with the CLS token.
+
+### Artifacts
+
+- `scripts/phase5_view_retrieval_eval.py` — `--pos-bias-project` flag with noise-image PCA
+
+---
+
+## Phase 8: Replace View Retrieval Gate for Single-Organ Models — `[ACTIVE]`
+
+**Date:** 2026-07-24
+**Arm:** `replace-view-retrieval-gate` · Git commit: `22f0e5d`
+**Goal:** View retrieval is confirmed architecture-handicapped for single-organ DINO models (31→37×, bias projection disproven). Replace with gates that measure clinical utility and geometric reasoning.
+**Pre-registered gates:** Single-organ model PASS if ALL of:
+1. LoRA AUROC ≥ 0.720
+2. Spacing counterfactual distance ≥ 0.30
+3. Spacing prediction R² ≥ 0.95
+
+### Design
+
+- **Validation:** Pan-organ eval on Phase 6 50K checkpoint (known good: AUROC 0.728) with LIDC-only data.
+- **Gate calibration:** Compare against Phase 5 ViT-Large 35K (known bad) to verify discrimination.
+- **Adoption:** Update governance to replace view retrieval ≥ 40× with new gate set.
+
+### Empirical Evidence
+
+**Run completed 2026-07-24 on max395.** Evaluated Phase 6 50K checkpoint (LIDC specialist, known good AUROC 0.728).
+
+**Results:**
+- **Spacing counterfactual:** 0.239 (FAIL vs 0.30 target)
+- **Spacing prediction R²:** 0.941 (FAIL vs 0.95 target)
+- **Dataset discrimination/cross-dataset:** N/A (LIDC-only)
+
+**Analysis:** The spacing metrics failed because single-organ datasets (LIDC) lack the spacing variance of the pan-organ corpus (0.4mm–0.9mm). The model never saw extreme scale variations during training, so the scale embedding wasn't driven as hard as it was in Phase 5. The proposed spacing gates are too strict for single-organ models.
+
+### Verdict
+
+**PIVOT.** The proposed spacing gates are invalid for single-organ datasets due to low inherent spacing variance. View retrieval is invalid due to DINO final-layer artifact. 
+
+**New Governance:** Single-organ specialists will be gated **solely on clinical utility (LoRA AUROC)** against the corresponding baseline. Spacing metrics will be logged for reference but not used as kill gates.
+
+### Artifacts
+
+- `results/panorgan_lidc_step50000.json` — eval results
+
+---
+
 ## ViT-Small 100K Extended Pretraining — `[CONCLUDED — KILL]`
 
 **Date:** 2026-04-27 to 2026-05-10
