@@ -884,3 +884,78 @@ meaningful scale-aware representations.
 | `20260103_141940` | vit-large (p14) | 32 | 0.0001 |  | 0.04 | Stopped |  |
 | `20260103_141803` | vit-large (p14) | 64 | 0.0001 |  | 0.04 | Stopped |  |
 | `20260103_141734` | vit-large (p14) | 64 | 0.0001 |  | 0.04 | Stopped |  |
+
+## 81K Checkpoint Evaluation (2026-05-08)
+**Goal:** Evaluate if extending the 5-dataset pan-organ run from 50K to 81K steps improved downstream LIDC malignancy performance.
+
+### View Retrieval (N=512, seed=42)
+- Ratio vs random: **63.0x** (up from 54.0x at 50K)
+- Top-1: 12.3%, Top-5: 34.0%
+
+### LoRA Fine-Tuning (LIDC Malignancy)
+Config: rank=8, alpha=16, LR=5e-4, 64px crops, lung window, 50 epochs
+- Best Epoch: 33
+- Val AUROC: **0.6970** (up from 0.684 at 50K)
+- Val Accuracy: 0.6527
+- Val Loss: 0.6392
+
+### Conclusion
+The AUROC broke past the 0.685 mark and hit **0.6970**, showing that longer pretraining (stretching the cosine schedule) *does* partially restore the organ-specific features lost to capacity dilution. However, it still falls short of the 4-organ specialist baseline (**0.710**). Letting the Strix Halo run finish the remaining ~19K steps to reach 100K is justified to see if it can fully close the gap, though it strongly suggests ViT-Small is near its absolute capacity ceiling.
+
+## 86K Checkpoint Evaluation (2026-05-10)
+**Goal:** Evaluate the 86K step checkpoint of the 5-dataset pan-organ run.
+
+### View Retrieval (N=512, seed=42)
+- Ratio vs random: **61.0x** (down slightly from 63.0x at 81K)
+- Top-1: 11.9%, Top-5: 37.7%
+
+### LoRA Fine-Tuning (LIDC Malignancy)
+Config: rank=8, alpha=16, LR=5e-4, 64px crops, lung window, 50 epochs
+- Best Epoch: 13
+- Val AUROC: **0.6425** (massive drop from 0.6970 at 81K)
+- Val Accuracy: 0.5687
+- Val Loss: 0.6634
+
+### Conclusion
+The model suffered a massive capacity collapse in organ-specific features between 81K and 86K. The AUROC dropped from nearly 0.70 all the way down to 0.6425. ViT-Small capacity is definitively saturated and has begun catastrophic forgetting of specialized domains under the pressure of the 5-dataset mix. The 100K run should be terminated; the path forward is scaling up to ViT-Base or ViT-Large.
+
+## Phase 5: Pan-Organ Scaling (ViT-Large) (2026-05-10)
+**Goal:** Overcome the capacity dilution observed in the ViT-Small 5-dataset run by scaling up to a ViT-Large backbone (~923M parameters total).
+
+### Configuration
+- **Backbone:** ViT-Large (patch=14, dim=1024, depth=24, heads=16)
+- **Effective Batch:** 256 (batch=32 × accum=8)
+- **LR Schedule:** 2e-5 (Golden Zone for Large), warmup 2500, min 1e-6
+- **Loss:** DINO + Gram(1.0) + KoLeo(0.1)
+- **Center Momentum:** 0.999 (crucial for breaking entropy wall)
+- **Anti-mem:** scale-aware, crop=0.3, z-stride=3, diverse_batches
+- **Run Dir:** 
+
+### Observations
+- **Initial State:** step=0, loss=8.7144, steps/s=0.00, samples/s=1.1 (first step includes JIT/kernel compilation overhead on ROCm).
+- **Parameter Count:** The script reports total parameters = 923.3M (this includes the massive 8192-dim DINO projector head on top of the 303M backbone).
+
+## Phase 5: Pan-Organ Scaling (ViT-Large) (2026-05-10)
+**Goal:** Overcome the capacity dilution observed in the ViT-Small 5-dataset run by scaling up to a ViT-Large backbone (~923M parameters total).
+
+### Configuration
+- **Backbone:** ViT-Large (patch=14, dim=1024, depth=24, heads=16)
+- **Effective Batch:** 256 (batch=32 x accum=8)
+- **LR Schedule:** 2e-5 (Golden Zone for Large), warmup 2500, min 1e-6
+- **Loss:** DINO + Gram(1.0) + KoLeo(0.1)
+- **Center Momentum:** 0.999 (crucial for breaking entropy wall)
+- **Anti-mem:** scale-aware, crop=0.3, z-stride=3, diverse_batches
+- **Run Dir:** runs/20260510_162938_5dataset-phase5-large-bs256
+
+### Observations
+- **Initial State:** step=0, loss=8.7144, steps/s=0.00, samples/s=1.1 (first step includes JIT/kernel compilation overhead on ROCm).
+- **Parameter Count:** The script reports total parameters = 923.3M (this includes the massive 8192-dim DINO projector head on top of the 303M backbone).
+
+### Optimization Breakthrough
+The massive ViT-Large + DINO head (923M parameters) severely bottlenecked the Strix Halo APU due to LPDDR5 memory bandwidth limits. The backward pass saturated the bus at `batch=32`.
+
+**Interventions applied:**
+1. `--grad-checkpoint`: Enabled gradient checkpointing (trade math for memory footprint).
+2. `--batch-size 8 --accumulation-steps 32`: Reduced micro-batch size to perfectly fit the APU Infinity Cache/L2.
+
+**Result:** Throughput exploded from 1.17 samples/s (126 day ETA) to **26.4 samples/s (5.6 day ETA)**. A 22.6x speedup. The run was resumed and is stable at step 2000+ with loss tracking perfectly in the 4.7 - 5.5 range, safely under the 9.01 entropy wall.

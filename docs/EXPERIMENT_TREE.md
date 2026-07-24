@@ -6,13 +6,20 @@ Living workstream map — status tags: `[ACTIVE]`, `[CONCLUDED]`, `[TBD]`. Evide
 
 ## Active
 
-- **[ACTIVE — STALLED] Phase 5: ViT-Large Pan-Organ Pretraining** (`runs/20260511_032957_5dataset-phase5-large-bs256/`)
-  - 5-dataset pan-organ corpus (400K slices), ViT-Large (923M params), effective batch 256
-  - 4 aborts on Strix Halo (May 10–11) — ROCm allocator fragmentation. Model was learning well (teacher entropy 6.60 at step 6,369). Checkpoints at step 5,000 and 6,369 available.
-  - **Resume plan:** `runs/20260511_032957_5dataset-phase5-large-bs256/README_RESUME.md` — memory mitigation with `expandable_segments:True` + smaller physical batch (4×64)
-  - See also: `docs/phase6_large_model_resume.md`
+- **[CONCLUDED — PIVOT] LIDC Single-Organ ViT-Base Specialist** (`lidc-specialist-vit-base-scale-aware`)
+  - ViT-Base (86M), LIDC-only, scale-aware. Completed 50K in 12.5h at 289 samples/s.
+  - **LoRA AUROC 0.728** (PASS vs 0.720 gate) — best malignancy result in project.
+  - **View retrieval 37×** (FAIL vs 40× gate) — gap traced to DINO final-layer spatial correspondence destruction (arXiv:2604.23670 validated). Layer selection recovers 31→37×. Added `--vit-layer` to eval script.
+  - **Lesson:** Single-organ specialist eliminates capacity dilution; view retrieval and AUROC are decoupled for LIDC.
 
 ## Concluded
+
+- **[CONCLUDED — KILL] Phase 5: ViT-Large Pan-Organ Pretraining** (`runs/20260719_042301_5dataset-phase5-large-bs256-v2/`)
+  - 5-dataset pan-organ corpus (400K slices), ViT-Large (923M params), effective batch 256
+  - Resumed 2026-07-19, completed 2026-07-22 at step 50,000. Memory mitigation stable; run finished cleanly.
+  - View retrieval peaked at 34× (step 25K) vs pre-registered 100× gate. Entropy collapsed to chaotic oscillation at 40K. Pan-organ eval confirmed scanner fingerprinting (AUC 0.981) and capacity dilution (colon↔vessel cosine 0.962).
+  - **Root cause:** DINO + KoLeo objective rewards scanner identity and spacing geometry over cross-organ anatomy. ViT-Small and ViT-Large both hit same wall at different speeds — model size is not the bottleneck.
+  - See `docs/DISCONTINUATION_NOTICE_5dataset-phase5-large-bs256-v2.md`.
 
 - **[CONCLUDED — GO] MVP Two-Organ Scale-Aware Ablation** (`runs/mvp-two-organ/`)
   - Baseline (no scale) vs Scale-Aware ViT-Small, 43K slices (LIDC + Pancreas-CT), 5K steps

@@ -64,10 +64,34 @@ def _load_split_series_dirs(split_manifest: Path, which: str) -> set[str]:
 
 
 @torch.no_grad()
-def _embed_backbone_cls(student: Any, x: torch.Tensor, spacing: torch.Tensor | None = None) -> torch.Tensor:
-    """Return L2-normalized CLS embedding from backbone."""
-    feats = student.backbone(x, spacing=spacing)  # (B, N+1, D)
-    cls = feats[:, 0]
+def _embed_backbone_cls(student: Any, x: torch.Tensor, spacing: torch.Tensor | None = None, vit_layer: int | None = None) -> torch.Tensor:
+    """Return L2-normalized CLS embedding from backbone.
+
+    If vit_layer is specified (0-indexed), extracts the CLS token after
+    that transformer block instead of the final backbone output. Layer 0
+    means after the first block. Per arXiv:2604.23670, middle layers
+    preserve spatial correspondence better than the final layer.
+    """
+    if vit_layer is None:
+        feats = student.backbone(x, spacing=spacing)  # (B, N+1, D)
+        cls = feats[:, 0]
+        return F.normalize(cls.float(), p=2, dim=-1)
+
+    # Manual forward through backbone up to layer `vit_layer`
+    vit = student.backbone
+    B = x.size(0)
+    y = vit.patch_embed(x)
+    y = y.flatten(2).transpose(1, 2)
+    cls_tokens = vit.cls_token.expand(B, -1, -1)
+    y = torch.cat([cls_tokens, y], dim=1)
+    y = y + vit.pos_embed
+    if vit.scale_aware and spacing is not None:
+        y = y + vit.scale_embed(spacing)
+    for i, blk in enumerate(vit.blocks):
+        y = blk(y)
+        if i == vit_layer:
+            break
+    cls = y[:, 0]
     return F.normalize(cls.float(), p=2, dim=-1)
 
 
@@ -91,6 +115,7 @@ def main() -> int:
         "--ratio", type=float, default=10.0, help="Pass gate: top1 >= ratio*(1/N)"
     )
     ap.add_argument("--scale-aware", action="store_true", help="Enable scale embedding (must match checkpoint)")
+    ap.add_argument("--vit-layer", type=int, default=None, help="Extract CLS from this 0-indexed layer instead of final backbone output (arXiv:2604.23670)")
     args = ap.parse_args()
 
     if not args.checkpoint.exists():
@@ -154,7 +179,7 @@ def main() -> int:
 
     if len(rows) < args.n:
         print(
-            f"⚠️  Requested --n={args.n} but only {len(rows)} val rows available; capping n."  # noqa: T201
+            f"\u26a0\ufe0f  Requested --n={args.n} but only {len(rows)} val rows available; capping n."  # noqa: T201
         )
         args.n = len(rows)
 
@@ -193,8 +218,9 @@ def main() -> int:
         x2 = torch.stack(v2_list, dim=0).to(device, non_blocking=True)
         sp = torch.stack(sp_list, dim=0).to(device, non_blocking=True) if args.scale_aware else None
 
-        q = _embed_backbone_cls(student, x1, spacing=sp)
-        k = _embed_backbone_cls(student, x2, spacing=sp)
+        layer = args.vit_layer
+        q = _embed_backbone_cls(student, x1, spacing=sp, vit_layer=layer)
+        k = _embed_backbone_cls(student, x2, spacing=sp, vit_layer=layer)
 
         Q_chunks.append(q.cpu())
         K_chunks.append(k.cpu())

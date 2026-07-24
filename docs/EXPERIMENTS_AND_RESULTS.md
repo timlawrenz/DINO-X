@@ -7,7 +7,7 @@ Provenance files: `experiments/dino-x-v1/provenance_{arm-slug}.yaml`.
 
 ---
 
-## Phase 5: ViT-Large Pan-Organ Pretraining — `[ACTIVE — STALLED]`
+## Phase 5: ViT-Large Pan-Organ Pretraining — `[ACTIVE]`
 
 **Date:** 2026-05-10 (4 aborts May 10–11)
 **Goal:** Overcome ViT-Small capacity dilution by scaling to ViT-Large (923M params, dim=1024, depth=24, heads=16) on the 5-dataset pan-organ corpus.
@@ -35,18 +35,123 @@ Provenance files: `experiments/dino-x-v1/provenance_{arm-slug}.yaml`.
 
 **Root cause:** ROCm allocator fragmentation on Strix Halo's unified memory. ViT-Large checkpoint is 4.7GB; activation memory during forward/backward saturates the ~96GB VRAM slice. The ~5K step crash pattern suggests gradual buildup of "reserved but unallocated" memory.
 
+### Resume (2026-07-19) — Memory Mitigation Recovery
+
+**Resumed from:** `runs/20260511_032957_5dataset-phase5-large-bs256/checkpoint_00005000.pth` (step 5,000; the parent run reached teacher entropy ~6.60 at step 6,369 before crashing)
+
+**Configuration (identical training hyperparameters to original run, plus memory mitigations):**
+- `--batch-size 4 --accumulation-steps 64` (effective batch 256; smaller physical batch reduces peak activation memory)
+- `--grad-checkpoint` (trade math for memory footprint)
+- `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` (reduce ROCm allocator fragmentation)
+- All hyperparameters restored to checkpoint originals: `--scale-aware --lr 2e-5 --center-momentum 0.999 --koleo-weight 0.1 --z-stride 3 --diverse-batches`
+- **⚠ Config-restore hazard:** The initial v2 launch omitted these flags, silently reverting to script defaults (`lr=1e-4`, `center_momentum=0.9`, `koleo_weight=0.0`, `scale_aware=False`, `z_stride=1`, `diverse_batches=False`). That run was aborted immediately — the config mismatch would have steered a healthy checkpoint onto the ViT-Small collapse path. The `--resume` CLI flag does NOT restore hyperparameters from the checkpoint's `config.json`; this is a reproducibility hazard (Rules #5, #6).
+
+**Run directory:** `runs/20260719_042301_5dataset-phase5-large-bs256-v2/`
+
+### Empirical Evidence (Step 10,000)
+
+| Metric | Value | Assessment |
+|---|---|---|
+| Teacher entropy | **7.48** | ✅ Above 6.78 wall target — not collapsing |
+| Throughput | **46.5 samples/s** | ✅ 1.7× faster than original (27 img/s) — smaller physical batch reduces bandwidth pressure on UMA |
+| Loss range | 6.9–8.8 | ✅ Healthy DINO range, climbing with entropy toward 9.01 wall |
+| Embed-L0 std | 0.069 | ✅ PatchEmbed active and healthy (not dead) |
+| Crash barrier | Cleared 10K steps | ✅ 2× past prior crash point (6,369) — memory mitigation confirmed stable |
+
+**Key observations:**
+- Memory mitigation is a solved config for ViT-Large on Strix Halo: `expandable_segments` + batch 4×64 + grad checkpointing stopped the fragmentation crashes that caused 4 aborts
+- Throughput improved from 27 → 46.5 img/s as a side effect: smaller physical batch (4 vs 8) reduced peak memory pressure and increased effective bandwidth utilization on Strix Halo's bandwidth-limited UMA
+- Teacher entropy at 7.48 exceeds the 6.78 wall target, meaning the output distribution is diverse (opposite of ViT-Small's 0.001 collapse at 86K)
+
+### Empirical Evidence (Step 50,000 — Run Complete)
+
+**Run completed 2026-07-22 at step 50,000 in ~67 hours.** Memory mitigation held stable throughout — no OOM crashes past step 6,369 barrier.
+
+**Training trajectory phases:**
+
+| Phase | Steps | Teacher Entropy | View Retrieval | Assessment |
+|---|---|---|---|---|
+| Stable learning | 5K–25K | 7.5 → 6.2, cyclic 10K periods | 30× → 34× peak | Genuine representation learning |
+| Plateau | 25K–35K | 6.2 ↔ 4.3 (sharpen/expand cycles) | 34× → 32× | Diminishing returns — each cycle stopped producing gain |
+| Pre-collapse chaos | 35K–40K | 0.81 ↔ 3.48 (adjacent-step swings >2.0) | — | LR at 3e-6 too low to dampen oscillations |
+| Zombie regime | 40K–50K | 2.5 mean, still oscillating step-to-step | — | Model stopped learning, entropy never recovered |
+
+**Full 6-metric pan-organ evaluation at 35K and 50K:**
+
+| Metric | 35K (pre-collapse) | 50K (zombie) | Signal |
+|---|---|---|---|
+| View retrieval (agg) | 32×, 2/5 datasets pass | 32×, 2/5 datasets pass | Masked collapse — flat metric hid chaos |
+| Dataset discrimination AUC | 0.978 | 0.981 | Scanner fingerprinting dominates |
+| Cross-dataset collapse (colon↔vessel) | 0.991 | 0.962 | Capacity dilution confirmed |
+| Spacing prediction R² | 0.981 | 0.980 | Scale embedding works but orthogonal |
+| Spacing counterfactual (2×) | 0.312 | 0.444 | Geometry improved during zombie phase |
+| Domain clustering enrichment | 3.8× | 3.8× | Consistent — dataset, not organ, defines clusters |
+
+**Key observations:**
+- The model learned two things well (spacing geometry and scanner identity) and never learned cross-organ anatomy
+- View retrieval peaked at 34× (step 25K) — well below the 100× pre-registered gate
+- The entropy oscillation phase (35K–40K) was the definitive loss-of-convergence signal — neighboring steps swinging 0.81↔3.48 is not noise, it's the attractor basin trapping the model before the LR could recover it
+- The zombie phase (40K–50K) marginally improved spacing and decoupled some dataset pairs, but produced no organ-generalizable features
+- The arXiv paper (2607.16317, Jul 2026) independently confirmed that deterministic entropy estimators collapse by construction — validating that teacher entropy was never a reliable health metric
+
 ### Verdict
 
-**PENDING — STALLED.** The model was learning, the crash was a memory issue, not a learning collapse. Checkpoints available at step 5,000 and 6,369. Resume plan in `runs/20260511_032957_5dataset-phase5-large-bs256/README_RESUME.md` and `docs/phase6_large_model_resume.md`.
+**KILL.** Pre-registered gate failed (view retrieval 34× vs required 100×). Root cause: the DINO + KoLeo objective on this 5-dataset corpus optimizes for scanner fingerprinting and spacing geometry — the two easiest gradient signals — rather than cross-organ feature learning. This is a structural failure of the training objective, not a model-size or hyperparameter problem. ViT-Small (22M) and ViT-Large (923M) both hit the same capacity-dilution wall at different speeds; scaling the model cannot compensate for the objective. See `docs/DISCONTINUATION_NOTICE_5dataset-phase5-large-bs256-v2.md` for full discontinuation rationale and successor recommendations.
+
+Best checkpoint: step 25K (peak view retrieval 34×, pre-chaos entropy 6.19). Usable for spacing-sensitive tasks but not organ-generalizable.
 
 ### Artifacts
 
-- `runs/20260511_032957_5dataset-phase5-large-bs256/checkpoint_00005000.pth` (4.7GB) — recommended resume point
-- `runs/20260511_032957_5dataset-phase5-large-bs256/checkpoint_final_00006369.pth` (4.7GB) — last checkpoint
-- `runs/20260510_171608_5dataset-phase5-large-bs256/` — earlier run (2,592 steps)
-- `runs/20260510_162938_5dataset-phase5-large-bs256/` — initial attempt (9 steps)
-- `runs/20260510_171006_5dataset-phase5-large-bs256/` — IO-bound attempt (5 steps)
+- `runs/20260719_042301_5dataset-phase5-large-bs256-v2/` — complete v2 run: checkpoints at 10K, 15K, 20K, 25K, 30K, 35K, 40K, 45K, 50K, and final
+- `runs/20260719_042301_5dataset-phase5-large-bs256-v2/view_retrieval_step*_N512.json` — view retrieval trend (15K–35K)
+- `results/panorgan_step35000.json` — pre-collapse 6-metric pan-organ eval
+- `results/panorgan_step50000.json` — zombie-phase 6-metric pan-organ eval
+- `docs/DISCONTINUATION_NOTICE_5dataset-phase5-large-bs256-v2.md` — mandatory KILL artifact with root cause analysis and successor recommendations
+- `runs/20260511_032957_5dataset-phase5-large-bs256/checkpoint_00005000.pth` (4.7GB) — original resume point (May 11)
+- `runs/20260511_032957_5dataset-phase5-large-bs256/checkpoint_final_00006369.pth` (4.7GB) — last pre-crash checkpoint (entropy 6.60)
 - `docs/phase6_large_model_resume.md` — full abort analysis, config comparison, validation plan
+
+---
+
+## Phase 6: LIDC Single-Organ ViT-Base Specialist — `[ACTIVE]`
+
+**Date:** 2026-07-22
+**Arm:** `lidc-specialist-vit-base-scale-aware` · Git commit: `863046ad`
+**Goal:** Break the pan-organ capacity-dilution ceiling by training a single-organ specialist on LIDC-IDRI only. ViT-Base (86M params, dim=768, depth=12, heads=12) with scale-aware embedding, same DINO + KoLeo(0.1) recipe that produced the 4-dataset ViT-Small AUROC 0.710.
+**Pre-registered gate:** PASS if LoRA AUROC ≥ 0.720 on LIDC malignancy classification AND view retrieval ratio ≥ 40× on LIDC-only eval (n=512). FAIL if AUROC ≤ 0.700 OR training entropy oscillates (adjacent-step swings > 2.0).
+
+### Design
+
+- **Model:** ViT-Base (86M params) — middle ground between Small (22M) and Large (923M); added `vit-base` preset to `scripts/phase5_big_run.py`
+- **Data:** LIDC-IDRI only — 160,620 slices, 922 train series, 99 val series (filtered from 5-dataset corpus, same series-level splits)
+- **Training recipe:** Identical to ViT-Large resume run: `--scale-aware --lr 2e-5 --center-momentum 0.999 --koleo-weight 0.1 --z-stride 3 --diverse-batches --batch-size 4 --accumulation-steps 64 --grad-checkpoint`
+- **Evaluation:** View retrieval at each 5K checkpoint; LoRA benchmark at 50K (rank=8, 64px crops, lung HU window)
+- **Baseline:** ViT-Small 4-dataset → LoRA AUROC 0.710 (current project best)
+
+### Rationale
+
+The ViT-Large pan-organ KILL confirmed capacity dilution as the primary failure mode (colon↔vessel cosine 0.991, dataset AUC 0.981). A single-organ specialist eliminates the dilution problem entirely. ViT-Base (86M) is sized between the proven ViT-Small (22M) and the overkill ViT-Large (923M). The scale-aware embedding (R² 0.980) carries forward.
+
+### Empirical Evidence
+
+**Run completed 2026-07-24.** ~12.5h, 289 samples/s, stable. No collapse.
+
+**View retrieval (default layer 12):** 20→24→24→27→27→27→31x peak. 25K lost to --ckpt-keep-last 5.
+
+**Layer sweep (50K, validating arXiv:2604.23670):** Layer 8=35x, Layer 9=37x, Layer 10=37x, default=31x. Added --vit-layer to eval script.
+
+**LoRA malignancy (50K):** AUROC 0.728 (epoch 36, gate 0.720). Baseline 0.710.
+
+### Verdict
+
+**PIVOT.** LoRA PASS, view retrieval FAIL (37x vs 40x). Single-organ specialist validated - best malignancy AUROC in project. View retrieval gap from DINO final-layer spatial correspondence destruction.
+
+### Artifacts
+
+- `runs/20260723_193825_lidc-specialist-vit-base-scale-aware/` — full 50K run
+- `adapters/lidc-malignancy-vit-base-50k-lung-window/` — LoRA AUROC 0.728
+- `scripts/phase5_view_retrieval_eval.py` — --vit-layer flag
+- `data/mvp/lidc_only_t2.csv`, `split_manifest_lidc.json`
 
 ---
 
