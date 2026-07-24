@@ -6,7 +6,12 @@ Living workstream map — status tags: `[ACTIVE]`, `[CONCLUDED]`, `[TBD]`. Evide
 
 ## Active
 
-_No active experiments._
+- **[ACTIVE] Scale LIDC Recipe to Other Organs** (`single-organ-specialists-expansion`)
+  - The ViT-Base scale-aware recipe on LIDC-only produced the project's best malignancy AUROC (0.728).
+  - Hypothesis: This single-organ specialist approach will generalize to other datasets (msd-colon, msd-hepatic-vessel), breaking the pan-organ capacity dilution.
+  - Pre-registered gate: Since view retrieval and spacing metrics are invalid for single-organ models, these will be gated purely on their LoRA AUROC against a baseline (if available) or raw classification capability.
+  - Data: `msd-colon` (38K slices) and `msd-hepatic-vessel` (48K slices) subsets extracted.
+  - Git commit: `647efd9`
 
 ## Concluded
 

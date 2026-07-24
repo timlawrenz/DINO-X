@@ -226,6 +226,37 @@ The ViT-Large pan-organ KILL confirmed capacity dilution as the primary failure 
 
 ---
 
+## Phase 9: Single-Organ Specialist Expansion — `[ACTIVE]`
+
+**Date:** 2026-07-24
+**Arm:** `single-organ-specialists-expansion` · Git commit: `647efd9`
+**Goal:** Apply the proven Phase 6 recipe (ViT-Base, single-organ, scale-aware) to the remaining datasets in the corpus (`msd-colon` and `msd-hepatic-vessel`) to verify the approach generalizes.
+**Pre-registered gate:** PASS if the models train stably without entropy collapse, and their LoRA fine-tuned adapters demonstrate clinically useful AUROC on their respective organ-specific tasks. (View retrieval and spacing metrics are explicitly excluded as kill gates per Phase 8 governance).
+
+### Design
+
+- **Models:** ViT-Base (86M params, dim=768, depth=12, heads=12)
+- **Data:**
+  - `msd-colon`: 38,373 slices, 116 train / 10 val series
+  - `msd-hepatic-vessel`: 48,021 slices, 275 train / 28 val series
+- **Training recipe:** Identical to Phase 6 LIDC specialist: `--scale-aware --lr 2e-5 --center-momentum 0.999 --koleo-weight 0.1 --z-stride 3 --diverse-batches --batch-size 4 --accumulation-steps 64 --grad-checkpoint`
+- **Evaluation:** Single-organ LoRA fine-tuning benchmarks.
+
+### Empirical Evidence
+
+_Pending — preparing GPU jobs._
+
+### Verdict
+
+**PENDING.**
+
+### Artifacts
+
+- `data/mvp/msd_colon_only_t2.csv` + manifest
+- `data/mvp/msd_hepatic_vessel_only_t2.csv` + manifest
+
+---
+
 ## ViT-Small 100K Extended Pretraining — `[CONCLUDED — KILL]`
 
 **Date:** 2026-04-27 to 2026-05-10
