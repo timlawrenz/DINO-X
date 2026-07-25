@@ -84,9 +84,6 @@ Living workstream map — status tags: `[ACTIVE]`, `[CONCLUDED]`, `[TBD]`. Evide
 
 ## TBD
 
-- **[TBD] Positional Bias Projection for View Retrieval** — apply arXiv:2604.23670 null-space projection to push view retrieval from 37× past the 40× gate on the existing 50K checkpoint. Low risk, evaluation-only change.
-- **[TBD] Replace View Retrieval Gate for Single-Organ Models** — layer-selection confirmed view retrieval is architecture-handicapped (31→37×). Use pan-organ metrics (spacing counterfactual, dataset discrimination) or LoRA AUROC as the primary gate for single-organ specialists.
-- **[TBD] Scale LIDC Recipe to Other Organs** — apply the proven ViT-Base + scale-aware + single-organ recipe to cq500 (brain), pancreas-ct, msd-colon, msd-hepatic-vessel. Baseline AUROC 0.728 on LIDC shows the approach works.
 - **[TBD] Fix `--ckpt-keep-last` Default** — change from 5 to 0 (keep all) or 10 to prevent checkpoint rotation from destroying intermediate evaluation points (lost 25K in Phase 6).
 - **[TBD] Many-to-Many View Retrieval Matching** — relax 1-to-1 nearest neighbor to top-K mutual neighbors (arXiv:2604.23670) in `phase5_view_retrieval_eval.py`.
 - **[TBD] Cross-Modality Expansion** — MRI (`dinox-mri-vit-small`) and X-ray (`dinox-xray-vit-small`) models.
