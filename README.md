@@ -9,7 +9,7 @@
 - **Permanent ledger:** [`docs/EXPERIMENTS_AND_RESULTS.md`](docs/EXPERIMENTS_AND_RESULTS.md) — all empirical findings, pre-registered gates, adversarial pass checklists
 - **Governance:** [`docs/experiment-structure.md`](docs/experiment-structure.md) — how this project implements the scientific experiment structure
 
-DINO-X is an open-source model zoo for medical imaging, training **pan-organ,
+DINO-X is an open-source model zoo for medical imaging, training **organ-specialist,
 modality-specific** Vision Foundation Models using self-supervised learning. Each
 model is **scale-aware**: it natively understands the physical dimensions of what
 it sees, not just the pixel grid.
@@ -18,9 +18,9 @@ it sees, not just the pixel grid.
 
 | Model | Modality | Input | Status |
 |-------|----------|-------|--------|
-| `dinox-ct-vit-small` | CT (all organs) | 2.5D slices + spacing | MVP proven |
-| `dinox-ct-vit-base` | CT (single organ) | 2.5D slices + spacing | **Active** (LIDC 0.728 AUROC) |
-| `dinox-ct-vit-large` | CT (all organs) | 2.5D slices + spacing | Killed (Capacity dilution) |
+| `dinox-ct-vit-small` | CT (pan-organ ablation) | 2.5D slices + spacing | MVP proven |
+| `dinox-ct-vit-base` | CT (single-organ specialists) | 2.5D slices + spacing | **Active** (LIDC 0.728 AUROC) |
+| `dinox-ct-vit-large` | CT (pan-organ scaling) | 2.5D slices + spacing | Killed (Capacity dilution) |
 | `dinox-mri-vit-small` | MRI (all organs) | 2.5D slices + spacing | Planned |
 | `dinox-xray-vit-small` | X-ray (all views) | 2D + pixel spacing | Planned |
 
@@ -31,10 +31,11 @@ because they rely on edges and colors. Medical imaging relies on **subtle textur
 differences** in grayscale — tissue density, nodule morphology, ground-glass
 opacities.
 
-Worse, existing medical foundation models are trained on narrow, single-organ
-datasets. [Recent analysis](https://huggingface.co/papers/2603.27460) catalogs
+Worse, existing medical foundation models are trained on narrow datasets with 
+no physical scale awareness. [Recent analysis](https://huggingface.co/papers/2603.27460) catalogs
 over 1,000 medical datasets and finds the data trapped in fragmented silos.
-DINO-X consolidates these silos into coherent, pan-organ pretraining.
+DINO-X addresses this by building highly capable **single-organ specialist models** 
+that are geometrically aware of the actual physical structures they observe.
 
 ### Scale Awareness
 
