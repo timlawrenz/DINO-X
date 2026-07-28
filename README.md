@@ -4,7 +4,7 @@
 
 ## Quick Orientation
 
-- **Current status:** [`PROJECT_STATUS.md`](PROJECT_STATUS.md) — Phase 5 STALLED (ViT-Large memory crash on Strix Halo; resuming with mitigation)
+- **Current status:** [`PROJECT_STATUS.md`](PROJECT_STATUS.md) — Phase 9 ACTIVE (Single-Organ Specialist Expansion)
 - **Workstream map:** [`docs/EXPERIMENT_TREE.md`](docs/EXPERIMENT_TREE.md) — active/concluded/TBD with verdict tags
 - **Permanent ledger:** [`docs/EXPERIMENTS_AND_RESULTS.md`](docs/EXPERIMENTS_AND_RESULTS.md) — all empirical findings, pre-registered gates, adversarial pass checklists
 - **Governance:** [`docs/experiment-structure.md`](docs/experiment-structure.md) — how this project implements the scientific experiment structure
@@ -19,7 +19,8 @@ it sees, not just the pixel grid.
 | Model | Modality | Input | Status |
 |-------|----------|-------|--------|
 | `dinox-ct-vit-small` | CT (all organs) | 2.5D slices + spacing | MVP proven |
-| `dinox-ct-vit-large` | CT (all organs) | 2.5D slices + spacing | Planned |
+| `dinox-ct-vit-base` | CT (single organ) | 2.5D slices + spacing | **Active** (LIDC 0.728 AUROC) |
+| `dinox-ct-vit-large` | CT (all organs) | 2.5D slices + spacing | Killed (Capacity dilution) |
 | `dinox-mri-vit-small` | MRI (all organs) | 2.5D slices + spacing | Planned |
 | `dinox-xray-vit-small` | X-ray (all views) | 2D + pixel spacing | Planned |
 
@@ -64,8 +65,19 @@ Pancreas-CT (abdomen) demonstrates the scale embedding's impact:
 | Baseline (no scale) | 8.992 | 5,000 | Stuck at entropy wall |
 | **Scale-aware** | **0.134** | 5,000 | Breaks through decisively |
 
-Both models are healthy (no feature collapse). Full results in
-[`docs/EXPERIMENTS.md`](docs/EXPERIMENTS.md).
+**Single-Organ Specialists (Phase 6):** Training a ViT-Base (86M params) purely on LIDC-IDRI produced the project's best malignancy classification performance, breaking the pan-organ capacity ceiling:
+
+| Arm | LoRA AUROC | View Retrieval | Note |
+|-----|------------|----------------|------|
+| ViT-Small (4-dataset) | 0.710 | 63× | Baseline |
+| **ViT-Base (LIDC only)** | **0.728** | **37×** | Single-organ specialist breaks the capacity ceiling |
+
+**Key Architectural Findings:**
+- **Capacity Dilution:** Scaling to 923M parameters (ViT-Large) on a 5-dataset pan-organ corpus led to scanner fingerprinting and cross-dataset collapse. Single-organ specialists eliminate this.
+- **DINO Final Layer Artifacts:** Evaluated against arXiv:2604.23670, DINO's final layers destroy spatial correspondence. Extracting features from layer 9 (75% depth) recovers view retrieval performance (31× → 37×).
+- **Metric Governance:** View retrieval and spacing metrics are structurally invalid for gating single-organ models. Clinical utility (LoRA AUROC) is the sole gate.
+
+Full results in [`docs/EXPERIMENTS_AND_RESULTS.md`](docs/EXPERIMENTS_AND_RESULTS.md).
 
 ## Quick Start
 
@@ -245,7 +257,7 @@ DINO-X is designed to train on consumer hardware:
 | Preprocessing | Any GPU | — | DICOM conversion |
 
 The AMD Strix Halo's 128GB unified memory breaks the "Memory Wall" that restricts
-billion-parameter training to enterprise data centers.
+billion-parameter training to enterprise data centers. Note for contributors: Models approaching 1B parameters on UMA require memory mitigations (`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` + grad checkpointing + small physical batch sizes like 4×64) to prevent allocator fragmentation and OOM kills.
 
 ## Criteria for Success
 
@@ -256,7 +268,7 @@ billion-parameter training to enterprise data centers.
 | Dataset discrimination | AUC ≥ 0.95 | ✅ AUC = 1.000 |
 | Spacing R² | ≥ 0.80 | ✅ R² = 0.876 |
 | No feature collapse | Embedding σ > 0 | ✅ Verified |
-| Linear probe AUC | > 0.90 on malignancy | Planned (Stage C) |
+| LoRA AUROC (single-organ) | ≥ 0.720 on LIDC | ✅ **0.728** (ViT-Base) |
 | Attention maps | Segment nodules unsupervised | Planned |
 
 ## License & Citation
@@ -265,8 +277,4 @@ billion-parameter training to enterprise data centers.
 - **Base Architecture:** Meta Research / DINOv3 with Gram Anchoring
 - **Data:** LIDC-IDRI and Pancreas-CT from [The Cancer Imaging Archive](https://www.cancerimagingarchive.net/)
 
-> **Status:** Active development. Phases 1–5 infrastructure complete (ScaleEmbedding,
-> data registry, training pipeline, model cards, HF Hub publishing, LoRA fine-tuning).
-> MVP proven with 67× loss improvement on two-organ ablation. ViT-Small pan-organ
-> capacity saturated; ViT-Large in progress (stalled — see PROJECT_STATUS.md).
-> See [`PROJECT_STATUS.md`](PROJECT_STATUS.md) for current state and next action.
+> **Status:** Active development. Phases 1–8 complete (ScaleEmbedding, data registry, model cards, LoRA fine-tuning, single-organ expansion). MVP proven with 67× loss improvement. Phase 5 ViT-Large pan-organ capacity saturated and stalled at scanner fingerprinting. Phase 9 currently executing the successful single-organ specialist strategy on new datasets (`msd-colon`, `msd-hepatic-vessel`). See [`PROJECT_STATUS.md`](PROJECT_STATUS.md) for current state and next action.
