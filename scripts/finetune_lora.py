@@ -536,6 +536,17 @@ def save_finetune(
 # ---------------------------------------------------------------------------
 
 
+def _seed_worker(worker_id: int) -> None:
+    """Worker init function for reproducible DataLoader shuffling.
+
+    Must be at module level (not nested in main) for multiprocessing
+    pickling compatibility.
+    """
+    seed = torch.initial_seed() % 2**32
+    np.random.seed(seed)
+    random.seed(seed)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description="Fine-tune a DINO-X backbone with LoRA adapters",
@@ -678,12 +689,6 @@ def main(argv: list[str] | None = None) -> None:
     if args.seed is not None:
         dl_generator = torch.Generator()
         dl_generator.manual_seed(args.seed)
-
-        def _seed_worker(worker_id: int) -> None:
-            seed = torch.initial_seed() % 2**32
-            np.random.seed(seed)
-            random.seed(seed)
-
         dl_worker_init = _seed_worker
 
     train_loader = DataLoader(
