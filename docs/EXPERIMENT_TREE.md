@@ -6,6 +6,13 @@ Living workstream map — status tags: `[ACTIVE]`, `[CONCLUDED]`, `[TBD]`. Evide
 
 ## Active
 
+- **[ACTIVE] MSD Organ Specialist LoRA Evaluation** (`msd-specialist-lora-eval`)
+  - Both 50K-step pretraining runs complete (colon: 18.6h, hepatic-vessel: 11.7h).
+  - Labels extracted: msd-colon (126 patients, 2,556 slices, 50/50 balanced), msd-hepatic-vessel (303 patients, 20,241 slices, 61/39).
+  - LoRA evaluation running with fixed DataLoader pickling bug.
+  - Gate: LoRA AUROC ≥ 0.70 (no baseline for these datasets yet).
+  - Git commit: `3880452` (DataLoader fix + label extractor)
+
 - **[ACTIVE] Scale LIDC Recipe to Other Organs** (`single-organ-specialists-expansion`)
   - The ViT-Base scale-aware recipe on LIDC-only produced the project's best malignancy AUROC (0.728).
   - Hypothesis: This single-organ specialist approach will generalize to other datasets (msd-colon, msd-hepatic-vessel), breaking the pan-organ capacity dilution.
