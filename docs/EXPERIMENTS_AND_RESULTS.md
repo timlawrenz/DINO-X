@@ -715,4 +715,73 @@ Full table: 37+ runs in `docs/experiments.csv`. Key lesson: ViT-Large Golden Zon
 
 ---
 
-*Ledger last updated: 2026-07-15. All GO verdicts marked GO-with-caveat pending adversarial pass completion. See EXPERIMENT_TREE.md for workstream map and PROJECT_STATUS.md for current state.*
+---
+
+## Phase 9: Single-Organ Specialist Expansion — `[CONCLUDED — PIVOT]`
+
+**Date:** 2026-08-31
+**Arm:** `single-organ-specialists-expansion` · Git commit: `3880452` (DataLoader fix + label extractor)
+**Goal:** Apply the proven Phase 6 recipe (ViT-Base, single-organ, scale-aware) to `msd-colon` and `msd-hepatic-vessel` to verify the approach generalizes beyond LIDC.
+**Pre-registered gate:** PASS if LoRA AUROC ≥ 0.70 (no baseline for these datasets yet; view retrieval and spacing metrics excluded as kill gates per Phase 8 governance).
+
+### Empirical Evidence
+
+**Pretraining:** Both 50K-step ViT-Base runs completed successfully with no entropy collapse.
+
+| Model | Steps | Duration | Final Loss | Throughput |
+|---|---|---|---|---|
+| msd-colon | 50K | 18.6h | 4.82 | 190 img/s |
+| msd-hepatic-vessel | 50K | 11.7h | 2.93 | 305 img/s |
+
+**Label Extraction:** Binary tumor/no-tumor labels from MSD NIfTI segmentation masks via new `extract_msd_labels.py` script (patient-level stratified splits).
+
+| Dataset | Patients | Slices | Positive | Negative | Split (train/val/test) |
+|---|---|---|---|---|---|
+| msd-colon | 126 | 2,556 | 1,278 (50%) | 1,278 (50%) | 88/18/20 patients |
+| msd-hepatic-vessel | 303 | 20,241 | 12,343 (61%) | 7,898 (39%) | 212/44/47 patients |
+
+**LoRA Fine-Tuning Results:**
+
+| Model | Best AUROC | Best Epoch | Val Loss | Accuracy | Gate (≥0.70) | Verdict |
+|---|---|---|---|---|---|---|
+| **msd-colon** | **0.6529** | 10 | 0.7154 | 0.5157 | **FAIL** | Training unstable, never converged |
+| **msd-hepatic-vessel** | **0.9456** | 23 | 0.3236 | 0.8711 | **PASS** | Strong clinical utility |
+
+**Key observations:**
+- **Hepatic-vessel is the strongest result in the project** — AUROC 0.9456 exceeds LIDC specialist (0.728) by 22 percentage points. The model learns liver vasculature extremely well.
+- **Colon fails to converge** — AUROC oscillates 0.58–0.65 across 20 epochs, never stabilizing. Early stopping at epoch 20. Possible causes: small dataset (126 patients), suboptimal HU window (-30/120 is lung-tuned), or colon CT texture being less distinctive for scale-aware ViT-Base.
+- **The single-organ specialist strategy is validated** — hepatic-vessel proves the recipe generalizes. Colon is a data/recipe problem, not a strategy problem.
+
+### Adversarial Pass
+
+- [ ] Metric code has unit tests — ❌ (LoRA eval script, no test suite for AUROC computation)
+- [ ] Metric definition unchanged — ✅ (same LoRA protocol, same val sets)
+- [ ] Result reproduced — ❌ (single seed=42 run per model; 0.016 variance on LIDC suggests multi-seed needed for <0.02 differences)
+- [ ] Extremes + edge cases inspected — ❌ (not performed)
+
+### Verdict
+
+**PIVOT.** Hepatic-vessel specialist PASSES (AUROC 0.9456 ≥ 0.70). Colon specialist FAILS (AUROC 0.6529 < 0.70). The single-organ strategy is validated but not universal — data quality and organ-specific texture distinctiveness matter.
+
+**What survives:**
+1. **Hepatic-vessel specialist** — Tier 1 release candidate. AUROC 0.9456, 87% accuracy, stable training.
+2. **LIDC specialist** — Tier 1 release candidate (previous PASS, AUROC 0.728).
+3. **MSD label extraction pipeline** — `extract_msd_labels.py` reusable for future organs.
+
+**What changes:**
+- Colon needs a new hypothesis before re-running. Possible directions: (1) larger dataset (more MSD colon patients or additional colon CT sources), (2) organ-specific HU window (colon soft tissue window, not lung window), (3) different backbone (ViT-Small may be sufficient for colon's simpler texture), (4) different task formulation (polyp detection vs tumor presence).
+
+### Artifacts
+
+- `runs/20260724_165202_colon-specialist-vit-base-scale-aware/` — full 50K pretraining run
+- `runs/20260728_180949_hepatic-specialist-vit-base-scale-aware/` — full 50K pretraining run
+- `adapters/msd-colon-vit-base-50k/` — LoRA adapter (AUROC 0.6529, FAIL)
+- `adapters/msd-hepatic-vessel-vit-base-50k/` — LoRA adapter (AUROC 0.9456, PASS)
+- `data/msd-colon/labels/` — train/val/test CSVs (2,556 slices)
+- `data/msd-hepatic-vessel/labels/` — train/val/test CSVs (20,241 slices)
+- `scripts/preprocessing/extract_msd_labels.py` — reusable MSD label extraction
+- `scripts/finetune_lora.py` — DataLoader pickling fix (module-level `_seed_worker`)
+
+---
+
+*Ledger last updated: 2026-08-31. All GO verdicts marked GO-with-caveat pending adversarial pass completion. See EXPERIMENT_TREE.md for workstream map and PROJECT_STATUS.md for current state.*

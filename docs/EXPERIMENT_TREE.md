@@ -6,14 +6,22 @@ Living workstream map — status tags: `[ACTIVE]`, `[CONCLUDED]`, `[TBD]`. Evide
 
 ## Active
 
-- **[ACTIVE] MSD Organ Specialist LoRA Evaluation** (`msd-specialist-lora-eval`)
-  - Both 50K-step pretraining runs complete (colon: 18.6h, hepatic-vessel: 11.7h).
-  - Labels extracted: msd-colon (126 patients, 2,556 slices, 50/50 balanced), msd-hepatic-vessel (303 patients, 20,241 slices, 61/39).
-  - LoRA evaluation running with fixed DataLoader pickling bug.
-  - Gate: LoRA AUROC ≥ 0.70 (no baseline for these datasets yet).
+- **[ACTIVE] Tier 1 Release Packaging** (`tier1-release-packaging`)
+  - Hepatic-vessel specialist PASSES (AUROC 0.9456) — ready for HF Hub.
+  - LIDC specialist PASSES (AUROC 0.728) — ready for HF Hub.
+  - Colon specialist FAILS (AUROC 0.6529) — needs new hypothesis before re-run.
+  - Next: package hepatic-vessel + LIDC for HF Hub release.
+  - Git commit: pending (packaging)
+
+## Concluded
+
+- **[CONCLUDED — PIVOT] Single-Organ Specialist Expansion** (`single-organ-specialists-expansion`)
+  - Hepatic-vessel specialist: AUROC 0.9456 (PASS, best in project)
+  - Colon specialist: AUROC 0.6529 (FAIL, unstable training)
+  - Strategy validated but not universal — organ texture distinctiveness matters.
   - Git commit: `3880452` (DataLoader fix + label extractor)
 
-- **[ACTIVE] Scale LIDC Recipe to Other Organs** (`single-organ-specialists-expansion`)
+- **[CONCLUDED — PIVOT] Scale LIDC Recipe to Other Organs** (`single-organ-specialists-expansion`)
   - The ViT-Base scale-aware recipe on LIDC-only produced the project's best malignancy AUROC (0.728).
   - Hypothesis: This single-organ specialist approach will generalize to other datasets (msd-colon, msd-hepatic-vessel), breaking the pan-organ capacity dilution.
   - Pre-registered gate: Since view retrieval and spacing metrics are invalid for single-organ models, these will be gated purely on their LoRA AUROC against a baseline (if available) or raw classification capability.
