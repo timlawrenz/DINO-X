@@ -110,6 +110,7 @@ def run_eval(model, head, loader, device, scale_aware):
     model.eval()
     head.eval()
     all_probs, all_labels, all_pids = [], [], []
+    n_done = 0
     for images, spacings, labels, pids in loader:
         images = images.to(device)
         spacing = spacings.to(device) if scale_aware else None
@@ -118,6 +119,9 @@ def run_eval(model, head, loader, device, scale_aware):
         all_probs.append(probs.cpu().numpy())
         all_labels.append(labels.numpy())
         all_pids.extend(pids)
+        n_done += images.shape[0]
+        if n_done % 2000 < images.shape[0] or n_done == len(loader.dataset):
+            print(f"  progress: {n_done}/{len(loader.dataset)} slices", flush=True)
     return (np.concatenate(all_probs), np.concatenate(all_labels), np.array(all_pids))
 
 
