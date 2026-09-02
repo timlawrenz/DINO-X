@@ -155,8 +155,8 @@ def patient_auroc(probs, labels, pids):
     # aggregate per patient: mean of slice probs, then AUROC over patients
     from collections import defaultdict
     agg_p, agg_l = defaultdict(list), defaultdict(int)
-    for p, l in zip(pids, labels):
-        agg_p[p].append(float(p))
+    for prob, l, p in zip(probs, labels, pids):
+        agg_p[p].append(float(prob))
         agg_l[p] = int(l)
     pat_probs = [float(np.mean(agg_p[p])) for p in agg_p]
     pat_labels = [agg_l[p] for p in agg_p]
@@ -200,6 +200,10 @@ def main(argv=None):
     loader = DataLoader(ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
     probs, labels, pids = run_eval(model, head, loader, device, scale_aware)
+    # Persist per-slice predictions so inference isn't lost if aggregation crashes
+    save_path = (args.adapter / f"external_probs_{Path(args.label_csv).stem}.npz")
+    np.savez_compressed(save_path, probs=probs, labels=labels, pids=pids)
+    print(f"Saved per-slice predictions to {save_path}")
     slice_auc = auroc(probs, labels)
     acc = float(((probs >= 0.5).astype(int) == labels).mean())
     pat_auc, n_pat = patient_auroc(probs, labels, pids)
