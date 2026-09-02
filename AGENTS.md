@@ -10,8 +10,9 @@ AI agent entry point. Read these docs in order before touching anything. The gov
 2. **`docs/EXPERIMENT_TREE.md`** — Shallow workstream map with status tags ([ACTIVE]/[CONCLUDED]/[TBD]).
 3. **`docs/EXPERIMENTS_AND_RESULTS.md`** — Permanent ledger: all empirical findings with pre-registered gates, adversarial pass checklists, and GO/PIVOT/PARK/KILL verdicts.
 4. **This file (`AGENTS.md`)** — Critical rules and project-specific conventions.
+5. **Load the skills** — The source of truth for *how* experiments run here lives in the skills, not in repo governance docs. Load `scientific-experiment-structure` (data/measurement design gates, adversarial pass, leakage rules) and `autonomous-research-execution` (orchestration) before planning or running any experiment. The skills evolve faster than any per-repo doc; follow them over `docs/experiment-structure.md`, which may be stale.
 
-Documentation lives in `docs/`. Governance: `docs/experiment-structure.md`. No other documentation files outside these locations.
+Documentation lives in `docs/`. Repo governance: `docs/experiment-structure.md` (may lag the skills — use as reference, not authority).
 
 ---
 
