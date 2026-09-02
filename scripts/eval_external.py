@@ -35,7 +35,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from zoo.arch import PatchViT
 from zoo.hub import load_model
-from zoo.peft import apply_lora, load_adapter
+from zoo.peft import load_adapter
 
 
 class EvalDataset(Dataset):
@@ -86,10 +86,15 @@ def load_adapter_model(args, device):
     cfg = json_load(args.adapter / "finetune_config.json")
     backbone = load_model(cfg["backbone"], device=str(device))
     dim = backbone.dim
-    # Re-apply LoRA then load the trained adapter weights (matches training path)
-    backbone = apply_lora(backbone, rank=cfg["rank"], alpha=cfg["alpha"])
+    # Load the trained LoRA adapter directly. PeftModel.from_pretrained reads
+    # rank/alpha/target_modules from adapter_config.json and injects LoRA — do NOT
+    # call apply_lora() here or the backbone gets double-wrapped and the adapter
+    # weights won't attach (silent random-LoRA inference).
     backbone = load_adapter(backbone, args.adapter)
     head = nn.Linear(dim, cfg["num_classes"]).to(device)
+    # Ensure all modules on the target device (PEFT wrap may reset to CPU)
+    backbone = backbone.to(device)
+    head = head.to(device)
     head.load_state_dict(torch.load(args.adapter / "head.pth", map_location=device))
     return backbone, head, cfg
 
@@ -108,7 +113,7 @@ def run_eval(model, head, loader, device, scale_aware):
     for images, spacings, labels, pids in loader:
         images = images.to(device)
         spacing = spacings.to(device) if scale_aware else None
-        logits = head(model(images, spacing=spacing))
+        logits = head(model(images, spacing=spacing)[:, 0])  # CLS token (matches FinetuneModel.forward)
         probs = torch.softmax(logits, dim=-1)[:, 1] if logits.shape[-1] == 2 else logits[:, 0]
         all_probs.append(probs.cpu().numpy())
         all_labels.append(labels.numpy())
