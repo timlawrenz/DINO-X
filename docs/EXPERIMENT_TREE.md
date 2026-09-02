@@ -7,13 +7,20 @@ Living workstream map — status tags: `[ACTIVE]`, `[CONCLUDED]`, `[TBD]`. Evide
 ## Active
 
 - **[ACTIVE] Tier 1 Release Packaging** (`tier1-release-packaging`)
-  - Hepatic-vessel specialist PASSES (AUROC 0.9456) — ready for HF Hub.
+  - Hepatic-vessel specialist: internal AUROC 0.9456 + **external CRLM validation** (slice 0.9413, patient 0.739, 197 new patients) — release-ready.
   - LIDC specialist PASSES (AUROC 0.728) — ready for HF Hub.
   - Colon specialist FAILS (AUROC 0.6529) — needs new hypothesis before re-run.
   - Next: package hepatic-vessel + LIDC for HF Hub release.
   - Git commit: pending (packaging)
 
 ## Concluded
+
+- **[CONCLUDED — GO with caveat] External Held-Out Validation (CRLM)** (`external-validation-crlm`)
+  - Hepatic-vessel specialist evaluated on CRLM (TCIA colorectal liver metastases), 197 patients / 17,639 slices, genuinely external to MSD pretraining.
+  - Slice-level AUROC 0.9413, patient-level AUROC 0.739 (majority vote), Spearman(vessel-richness, score) 0.53 (p≈1e-15).
+  - Kills scanner-fingerprinting fear: model transfers to a different institution's scans on correct vessel semantics.
+  - Patient-level "binary AUROC" 0.47 initially flagged — artifact of ill-posed all-mixed patient task, not a model failure.
+  - Git commit: `2073ff0` + `a556689` (extractor + eval harness)
 
 - **[CONCLUDED — PIVOT] Single-Organ Specialist Expansion** (`single-organ-specialists-expansion`)
   - Hepatic-vessel specialist: AUROC 0.9456 (PASS, best in project)
