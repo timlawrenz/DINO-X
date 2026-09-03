@@ -78,17 +78,31 @@ For a newcomer who wants to trust this model:
 
 ## Generating The Envelope
 
-A helper script builds the envelope skeleton and validates it (every required file
-present, every headline JSON field exists, reproducibility script references loadable
-paths):
+A helper script scaffolds a new envelope and validates it. It **auto-populates**
+`02_training_recipe.md` and `provenance.yaml` from the frozen `finetune_config.json`
+and backbone `config.json` — so the numbers come from disk, never memory. It does NOT
+invent the honest narrative (decision trail / validation / negative results / limits are
+written by a human who ran the work).
 
-```
-# (to be added) scripts/release/build_envelope.py --model-slug dinox-ct-msd-hepatic-vessel-vit-base-v1
+```bash
+# Build a new envelope from an adapter dir
+python scripts/release/build_envelope.py build \
+  --adapter-path adapters/{task}-{backbone}-{variant} \
+  --model-slug dinox-ct-{organ}-{backbone}-v1 \
+  --internal-auc {auc} [--leakage-caveat "..."]
+
+# Validate an existing envelope (all required files present)
+python scripts/release/build_envelope.py validate --model-slug {slug}
 ```
 
 Validation rules the generator enforces:
 - `ENVELOPE.md`, `model_card.md`, `evaluation.json`, `provenance.yaml`,
-  `source_branch`, and all 5 `the_science/` files exist.
+  `source_branch`, and all 5 `the_science/` files + `reproduce/README.md` exist.
+- Recipe + provenance auto-populated from frozen configs (not hand-typed).
 - Every key in `evaluation.json` has a corresponding claim in `03_validation.md`.
-- `provenance.yaml` has non-null `git_commit` (bare) and `adapter_git_commit` fields.
-- `reproduce/repro_metrics.py` exists and imports the model loader.
+- `reproduce/repro_metrics.py` exists for mechanical metric reproduction.
+
+The human still writes: `01_decision_trail.md`, `03_validation.md`,
+`04_negative_results.md`, `05_known_limits.md`, and the model-card narrative. That is
+the point — the envelope's credibility comes from the honest story being told, which
+cannot be faked by a scaffolder.
