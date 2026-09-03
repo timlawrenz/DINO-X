@@ -1,0 +1,176 @@
+{
+  "model": "dinox-ct-msd-hepatic-vessel-vit-base-v1",
+  "generated": "generate_data_provenance.py",
+  "git_commit": "9b34237e4d0046f55a83748e5acd817db609325a",
+  "data_catalog_hash_sha256_16": "7eebf9085200017b",
+  "datasets": [
+    {
+      "name": "msd-hepatic-vessel",
+      "source": "http://medicaldecathlon.com/",
+      "license": "CC-BY-SA-4.0",
+      "redistribution": "allowed_with_conditions",
+      "source_url": "http://medicaldecathlon.com/",
+      "citation": "Antonelli M, Reinke A, Bakas S, et al. The Medical Segmentation Decathlon. Nature Communications, 2022;13:4128. https://doi.org/10.1038/s41467-022-30695-9\n",
+      "attribution": "Medical Segmentation Decathlon \u2014 Task 08 (Hepatic Vessel). Cite Antonelli et al. (2022). Original data: http://medicaldecathlon.com/\n",
+      "slices_in_index": 48021
+    }
+  ],
+  "pretraining_training_index": {
+    "path": "data/mvp/msd_hepatic_vessel_only_t2.csv",
+    "content_hash_sha256_16": "71079e567d7fcb33",
+    "total_slices": 48021,
+    "by_dataset": {
+      "msd-hepatic-vessel": 48021
+    },
+    "spacing": {
+      "spacing_x": {
+        "min": 0.5684,
+        "max": 0.9766,
+        "mean": 0.8026
+      },
+      "spacing_y": {
+        "min": 0.5684,
+        "max": 0.9766,
+        "mean": 0.8026
+      },
+      "slice_thickness": {
+        "min": 0.8,
+        "max": 8.0,
+        "mean": 3.2779
+      }
+    },
+    "row_preview": {
+      "dataset": "msd-hepatic-vessel",
+      "png_path": "data/processed/msd-hepatic-vessel/msd-hepatic-vessel_hepaticvessel_286/slice_0003.png",
+      "series_dir": "msd-hepatic-vessel_hepaticvessel_286",
+      "slice_index": "3",
+      "encoding": "hu16_i16_offset32768_clip-1000_4000",
+      "spacing_x": "0.789062",
+      "spacing_y": "0.789062",
+      "spacing_z": "1.500000"
+    },
+    "row_keys": [
+      "dataset",
+      "png_path",
+      "series_dir",
+      "slice_index",
+      "encoding",
+      "spacing_x",
+      "spacing_y",
+      "spacing_z"
+    ],
+    "manifest": {
+      "train": {
+        "count": 275,
+        "sample": [
+          "msd-hepatic-vessel_hepaticvessel_001",
+          "msd-hepatic-vessel_hepaticvessel_002",
+          "msd-hepatic-vessel_hepaticvessel_004"
+        ]
+      },
+      "val": {
+        "count": 28,
+        "sample": [
+          "msd-hepatic-vessel_hepaticvessel_007",
+          "msd-hepatic-vessel_hepaticvessel_013",
+          "msd-hepatic-vessel_hepaticvessel_026"
+        ]
+      },
+      "counts": {
+        "train_series": 275,
+        "val_series": 28
+      }
+    },
+    "datasets": [
+      {
+        "name": "msd-hepatic-vessel",
+        "source": "http://medicaldecathlon.com/",
+        "license": "CC-BY-SA-4.0",
+        "redistribution": "allowed_with_conditions",
+        "source_url": "http://medicaldecathlon.com/",
+        "citation": "Antonelli M, Reinke A, Bakas S, et al. The Medical Segmentation Decathlon. Nature Communications, 2022;13:4128. https://doi.org/10.1038/s41467-022-30695-9\n",
+        "attribution": "Medical Segmentation Decathlon \u2014 Task 08 (Hepatic Vessel). Cite Antonelli et al. (2022). Original data: http://medicaldecathlon.com/\n",
+        "slices_in_index": 48021
+      }
+    ]
+  },
+  "fine_tuning_labels": {
+    "finetune_train": {
+      "path": "data/msd-hepatic-vessel/labels/msd_hepatic_vessel_train.csv",
+      "content_hash_sha256_16": "3b6403427a585457",
+      "total_rows": 14229,
+      "positive": 8591,
+      "negative": 5638,
+      "positive_frac": 0.6038,
+      "n_patients": 212,
+      "row_keys": [
+        "image_path",
+        "label",
+        "spacing_x",
+        "spacing_y",
+        "spacing_z",
+        "patient_id",
+        "tumor_pixels",
+        "slice_has_tumor"
+      ]
+    },
+    "finetune_val": {
+      "path": "data/msd-hepatic-vessel/labels/msd_hepatic_vessel_val.csv",
+      "content_hash_sha256_16": "335cc4dbda9f2b25",
+      "total_rows": 2840,
+      "positive": 1790,
+      "negative": 1050,
+      "positive_frac": 0.6303,
+      "n_patients": 44,
+      "row_keys": [
+        "image_path",
+        "label",
+        "spacing_x",
+        "spacing_y",
+        "spacing_z",
+        "patient_id",
+        "tumor_pixels",
+        "slice_has_tumor"
+      ]
+    },
+    "test": {
+      "path": "data/msd-hepatic-vessel/labels/msd_hepatic_vessel_test.csv",
+      "content_hash_sha256_16": "6dcc72579cb2685e",
+      "total_rows": 3172,
+      "positive": 1962,
+      "negative": 1210,
+      "positive_frac": 0.6185,
+      "n_patients": 47,
+      "row_keys": [
+        "image_path",
+        "label",
+        "spacing_x",
+        "spacing_y",
+        "spacing_z",
+        "patient_id",
+        "tumor_pixels",
+        "slice_has_tumor"
+      ]
+    }
+  },
+  "external_validation": {
+    "path": "data/crlm/vessel_labels.csv",
+    "content_hash_sha256_16": "37651fb38ce10660",
+    "total_rows": 17639,
+    "positive": 8992,
+    "negative": 8647,
+    "positive_frac": 0.5098,
+    "n_patients": 197,
+    "row_keys": [
+      "png_path",
+      "label",
+      "spacing_x",
+      "spacing_y",
+      "spacing_z",
+      "patient_id",
+      "vessel_pixels"
+    ],
+    "manifest": null,
+    "source_note": "External held-out set, disjoint from training (see the_science/03_validation.md)"
+  }
+}

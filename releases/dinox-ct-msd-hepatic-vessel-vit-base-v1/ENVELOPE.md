@@ -27,17 +27,20 @@ not scanner identity. See `the_science/03_validation.md`.
 
 ## Follow The Science (reading order)
 
-1. **`the_science/01_decision_trail.md`** — Why this model exists, and the pan-organ
+1. **`data_catalog.md`** — exactly which data points went in: datasets, sources,
+   licenses, slice counts, spacing distributions, content hashes, splits.
+   Machine-readable twin: `data_provenance.json`.
+2. **`the_science/01_decision_trail.md`** — Why this model exists, and the pan-organ
    failure that made organ-specialists the right call. Includes the red-team leakage
    finding that forced the salvage.
-2. **`the_science/02_training_recipe.md`** — Exact pretraining recipe (data, preprocessing,
+3. **`the_science/02_training_recipe.md`** — Exact pretraining recipe (data, preprocessing,
    hyperparameters, scale-awareness) and LoRA fine-tuning config.
-3. **`the_science/03_validation.md`** — Every test we ran and how we know it's real:
+4. **`the_science/03_validation.md`** — Every test we ran and how we know it's real:
    the adversarial pass, the leakage audit, and the external CRLM validation.
-4. **`the_science/04_negative_results.md`** — What failed on the way: the pan-organ
+5. **`the_science/04_negative_results.md`** — What failed on the way: the pan-organ
    capacity-dilution KILL, the invalid view-retrieval gates, the colon specialist FAIL.
-5. **`the_science/05_known_limits.md`** — Where this model still fails, honestly.
-6. **`reproduce/README.md`** — Reproduce every number yourself.
+6. **`the_science/05_known_limits.md`** — Where this model still fails, honestly.
+7. **`reproduce/README.md`** — Reproduce every number yourself.
 
 ---
 

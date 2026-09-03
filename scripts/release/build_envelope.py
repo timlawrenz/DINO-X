@@ -37,6 +37,7 @@ RELEASES = REPO_ROOT / "releases"
 REQUIRED = [
     "ENVELOPE.md", "model_card.md", "evaluation.json", "provenance.yaml",
     "source_branch",
+    "data_catalog.md", "data_provenance.json",
     "the_science/01_decision_trail.md",
     "the_science/02_training_recipe.md",
     "the_science/03_validation.md",

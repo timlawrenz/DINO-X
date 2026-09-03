@@ -64,15 +64,18 @@ we publish our reasoning, our failures, and our verification, not just our resul
 For a newcomer who wants to trust this model:
 
 1. Read `ENVELOPE.md` (this file) — the map.
-2. Read `the_science/01_decision_trail.md` — *why* this model exists, including the
+2. Read `data_catalog.md` — *exactly which data points* went in (datasets, sources,
+   licenses, slice counts, spacing, content hashes, splits). Machine-readable twin:
+   `data_provenance.json`.
+3. Read `the_science/01_decision_trail.md` — *why* this model exists, including the
    failures that shaped it.
-3. Read `the_science/02_training_recipe.md` — *exactly* what went in.
-4. Read `the_science/03_validation.md` — *how we know the numbers are real*, including
+4. Read `the_science/02_training_recipe.md` — *exactly* what went in.
+5. Read `the_science/03_validation.md` — *how we know the numbers are real*, including
    adversarial passes and any external held-out validation.
-5. Read `the_science/04_negative_results.md` — *what we tried that failed*, and the
+6. Read `the_science/04_negative_results.md` — *what we tried that failed*, and the
    evidence.
-6. Read `the_science/05_known_limits.md` — *where it still breaks*.
-7. Run `reproduce/repro_metrics.py` — reproduce the headline numbers yourself.
+7. Read `the_science/05_known_limits.md` — *where it still breaks*.
+8. Run `reproduce/repro_metrics.py` — reproduce the headline numbers yourself.
 
 ---
 
@@ -93,6 +96,15 @@ python scripts/release/build_envelope.py build \
 
 # Validate an existing envelope (all required files present)
 python scripts/release/build_envelope.py validate --model-slug {slug}
+
+# After training + validation: generate the data provenance catalog
+# (datasets, sources, licenses, slice counts, spacing, content hashes, splits)
+python scripts/release/generate_data_provenance.py \
+  --model-slug {slug} --adapter-path adapters/{task}-{backbone}-{variant} \
+  --train-index data/mvp/{index}.csv \
+  --finetune-train ... --val-labels ... [--test-labels ...] \
+  [--external-labels data/crlm/{ext_labels}.csv] \
+  [--manifest data/mvp/split_manifest_{...}.json] --catalog-dir zoo/datasets/ct
 ```
 
 Validation rules the generator enforces:
@@ -101,6 +113,8 @@ Validation rules the generator enforces:
 - Recipe + provenance auto-populated from frozen configs (not hand-typed).
 - Every key in `evaluation.json` has a corresponding claim in `03_validation.md`.
 - `reproduce/repro_metrics.py` exists for mechanical metric reproduction.
+- **Data provenance:** `data_catalog.md` + `data_provenance.json` present for any
+  released model (generated from the actual index/label files, not hand-typed counts).
 
 The human still writes: `01_decision_trail.md`, `03_validation.md`,
 `04_negative_results.md`, `05_known_limits.md`, and the model-card narrative. That is
