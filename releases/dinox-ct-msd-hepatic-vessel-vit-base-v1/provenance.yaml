@@ -1,0 +1,24 @@
+arm: dinox-ct-msd-hepatic-vessel-vit-base-v1
+mode: confirmatory
+git_commit_bare: 3880452
+git_commit_external_validation: d1aab1c
+adapter_git_commit: 3880452
+eval_harness_commit: 21c280f
+crlm_extractor_commit: a556689
+redteam_commit: 672454a
+source_branch: main
+training_host: max395
+training_gpu: Radeon 8060S (Strix Halo, ROCm)
+data_snapshot: "MSD Hepatic-Vessel 48,021 slices (pretrain); external TCIA CRLM 197 patients / 17,639 slices (eval)"
+task: hepatic/portal-vessel-present binary classification
+adapter_path: adapters/msd-hepatic-vessel-vit-base-50k
+internal_auroc: 0.9456
+external_slice_auroc: 0.9413
+external_patient_auroc: 0.739
+external_patients: 197
+external_slices: 17639
+license: Apache-2.0
+hf_slug: timlawrenz/dinox-ct-msd-hepatic-vessel-vit-base-v1 (planned)
+notes: >
+  Internal AUROC carries pretraining-leakage caveat (93% of fine-tune val patients
+  were in pretrain train). External TCIA CRLM AUROC is the release-supporting number.

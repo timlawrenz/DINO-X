@@ -1,0 +1,24 @@
+{
+  "model": "dinox-ct-msd-hepatic-vessel-vit-base-v1",
+  "task": "hepatic/portal-vessel-present classification",
+  "internal": {
+    "auroc": 0.9456,
+    "best_epoch": 23,
+    "best_val_loss": 0.3236,
+    "leakage_caveat": "93% of fine-tune val patients were in pretrain train; internal number NOT release-supporting"
+  },
+  "external_crlm": {
+    "source": "TCIA ColoRectal Liver Metastases",
+    "patients": 197,
+    "slices": 17639,
+    "slice_auroc": 0.9413,
+    "slice_accuracy_at_0.5": 0.8791,
+    "patient_auroc_majority_vote": 0.739,
+    "spearman_patient_vessel_fraction_vs_score": 0.527,
+    "spearman_pvalue": 1.8e-15,
+    "disjoint_from_training": true,
+    "label_semantics": "Hepatic (seg 3) + Portal (seg 4) vessel present per slice"
+  },
+  "release_supporting_number": "external_crlm.slice_auroc = 0.9413",
+  "license": "Apache-2.0"
+}
