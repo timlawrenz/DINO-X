@@ -65,17 +65,20 @@ rescale slope/intercept). Output is a raw softmax probability — this model shi
 ### Requirements
 
 ```bash
-git clone git@github.com:timlawrenz/DINO-X.git
+git clone https://github.com/timlawrenz/DINO-X.git
 cd DINO-X
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt     # see note below on torch builds
-pip install peft safetensors
+
+# 1) torch for your hardware (CPU/CUDA default; see pytorch.org for CUDA/ROCm)
+pip install torch torchvision
+# 2) inference deps + the zoo package
+pip install -r requirements-inference.txt
+pip install .            # makes `from zoo.predict import ...` importable
 ```
 
-> **Torch build:** `requirements.txt` pins ROCm wheels for the training machine
-> via local paths. On a CUDA or CPU machine, install a standard torch build first
-> (`pip install torch torchvision` from [pytorch.org](https://pytorch.org)) — the
-> model is device-agnostic and runs on CPU, CUDA, or ROCm.
+> The model is device-agnostic and runs on CPU, CUDA, or ROCm.
+> `requirements-inference.txt` has no machine-specific pins; the training repo's
+> `requirements.txt` is only needed for the training hosts.
 
 ### Under the hood (what `load_classifier` does for you)
 
