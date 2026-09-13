@@ -251,7 +251,8 @@ class PngDataset(torch.utils.data.Dataset):
         arr = np.asarray(im)
         if arr.dtype != np.uint16:
             arr = arr.astype(np.uint16)
-        hu = arr.astype(np.float32) - HU_OFFSET
+        # Canonical DINO-X decode: HU = (u16 - 32768) * 0.1 (encode is round(HU*10)+32768).
+        hu = (arr.astype(np.float32) - HU_OFFSET) * 0.1
         return _window_hu_to_01(hu, level=level, width=width)
 
     def __getitem__(self, idx: int) -> torch.Tensor:

@@ -42,7 +42,8 @@ def _preview_rgb(p: Path) -> Image.Image:
         arr = np.asarray(im)
         if arr.dtype != np.uint16:
             arr = arr.astype(np.uint16)
-        hu = arr.astype(np.float32) - HU_OFFSET
+        # Canonical DINO-X decode: HU = (u16 - 32768) * 0.1 (encode is round(HU*10)+32768).
+        hu = (arr.astype(np.float32) - HU_OFFSET) * 0.1
         u8 = _window_hu_to_u8(hu, level=-600.0, width=1500.0)  # lung-ish preview
         return Image.fromarray(u8, mode="L").convert("RGB")
     return im.convert("RGB")

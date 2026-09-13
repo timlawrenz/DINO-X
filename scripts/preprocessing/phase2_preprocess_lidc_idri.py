@@ -42,6 +42,7 @@ except Exception:  # pragma: no cover
 HU_CLIP_LO = -1000.0
 HU_CLIP_HI = 4000.0
 HU_OFFSET = 32768
+HU_SCALE = 10.0  # one decimal of HU precision; canonical, matches the shipped corpus
 
 
 @dataclass(frozen=True)
@@ -52,8 +53,16 @@ class SliceKey:
 
 
 def hu_to_u16(img_hu: "np.ndarray") -> "np.ndarray":
+    """CANONICAL DINO-X encoding: ``u16 = round(clip(HU) * 10) + 32768``.
+
+    Decode is ``HU = (u16 - 32768) * 0.1``. Matches every training/eval/inference
+    reader and the shipped corpus. An earlier revision omitted the *10 scale and
+    silently produced data 10x off; do not regress this. Clamped to uint16 range so
+    the +4000 clip edge saturates instead of wrapping.
+    """
     x = np.clip(img_hu, HU_CLIP_LO, HU_CLIP_HI)
-    x = np.rint(x + float(HU_OFFSET))
+    x = np.rint(x * HU_SCALE + float(HU_OFFSET))
+    x = np.clip(x, 0, 65535)
     return x.astype(np.uint16)
 
 

@@ -18,9 +18,12 @@ We convert 12-bit DICOM files into 16-bit PNGs to create a "Raw" dataset that is
     *   Bone $\approx$ +400 - +1000 HU
 3.  **Clip:** Range is clipped to `[-1000, 4000]`.
     *   Reason: Values below -1000 are sensor artifacts/noise. Values above 4000 are metal artifacts or dense bone, irrelevant for soft tissue analysis.
-4.  **Offset & Cast:** Shift values to be positive for `uint16` storage.
-    *   $PV_{png} = \text{round}(HU + 32768)$
+    *   Note: the uint16 encoding (next step) saturates at +3276.7 HU, so the effective storable ceiling is +3276.7; the [−1000, +4000] clip is applied *before* scaling.
+4.  **Scale, Offset & Cast:** Scale to one decimal of precision, shift positive, store as `uint16`.
+    *   $PV_{png} = \text{round}(HU \times 10) + 32768$  — i.e. `u16 = round(clip(HU)*10) + 32768`, clamped to `[0, 65535]`.
+    *   Decode: $HU = (PV_{png} - 32768) \times 0.1$
     *   Stored as single-channel 16-bit PNG.
+    *   This is the canonical DINO-X encoding used by every training/eval/inference reader.
 
 ### Step 2: Dynamic Loading (PNG to Tensor)
 **Script:** `scripts/phase5_big_run.py` (`PngDataset`)

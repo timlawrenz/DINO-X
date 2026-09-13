@@ -36,12 +36,27 @@ from PIL import Image
 HU_CLIP_LO = -1000.0
 HU_CLIP_HI = 4000.0
 HU_OFFSET = 32768
+HU_SCALE = 10.0  # one decimal of HU precision; canonical, matches the shipped corpus
 
 
 def hu_to_u16(img_hu: np.ndarray) -> np.ndarray:
-    """Convert HU float array to uint16 for 16-bit PNG storage."""
+    """Convert HU float array to uint16 for 16-bit PNG storage.
+
+    CANONICAL DINO-X encoding: ``u16 = round(clip(HU) * 10) + 32768``.
+    Decode is ``HU = (u16 - 32768) * 0.1``. This matches every training/eval/
+    inference reader (zoo/data.py, finetune_lora.py, eval_external.py,
+    phase5_big_run.py, evaluate_panorgan.py, phase5_monitor.py) and the shipped
+    corpus (verified against on-disk PNG bytes). An earlier revision omitted the
+    *10 scale and silently produced data 10x off; do not regress this.
+
+    Encodable range without overflow: clip bounds [-1000, 4000] map to
+    [22768, 72768]; +4000 exceeds uint16 max (65535) and wraps, so we clamp the
+    pre-scale value to the safe max.
+    """
     x = np.clip(img_hu, HU_CLIP_LO, HU_CLIP_HI)
-    x = np.rint(x + float(HU_OFFSET))
+    x = np.rint(x * HU_SCALE + float(HU_OFFSET))
+    # Guard against uint16 overflow at the +4000 clip edge (72768 > 65535).
+    x = np.clip(x, 0, 65535)
     return x.astype(np.uint16)
 
 
