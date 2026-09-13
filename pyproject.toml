@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dinox-zoo"
+version = "0.1.0"
+description = "DINO-X model zoo: scale-aware medical-imaging foundation models and specialist classifiers"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Tim Lawrenz" }]
+keywords = ["medical-imaging", "ct", "self-supervised", "vision-transformer", "dino", "scale-aware"]
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# Core inference deps only. Torch is intentionally NOT pinned here — install the
+# build for your accelerator first (CPU/CUDA from pytorch.org, or ROCm). See
+# requirements-inference.txt for the full pinned set used for the release.
+dependencies = [
+    "numpy",
+    "pillow",
+    "torch",
+    "torchvision",
+    "huggingface_hub",
+    "pyyaml",
+    "pydantic",
+]
+
+[project.optional-dependencies]
+# LoRA fine-tuning / adapter loading (import-guarded in zoo.peft).
+peft = ["peft", "safetensors"]
+# Faster/safer weight loading for hub checkpoints (import-guarded in zoo.hub).
+safetensors = ["safetensors"]
+# Training-time extras (data manifests, lineage, publishing).
+train = ["peft", "safetensors", "pandas", "pyarrow", "nibabel", "tensorboard"]
+
+[project.urls]
+Homepage = "https://github.com/timlawrenz/DINO-X"
+Repository = "https://github.com/timlawrenz/DINO-X"
+
+[tool.setuptools.packages.find]
+include = ["zoo*"]
+
+[tool.setuptools.package-data]
+zoo = ["datasets/**/*.yaml"]

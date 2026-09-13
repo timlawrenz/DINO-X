@@ -1,0 +1,29 @@
+# Portable inference requirements for DINO-X released models.
+#
+# This is what a researcher needs to LOAD and RUN a released model (e.g.
+# dinox-ct-msd-hepatic-vessel-vit-base-v1) on any machine — CPU, CUDA, or ROCm.
+#
+# It deliberately does NOT pin torch to a specific wheel: install the torch build
+# for your accelerator FIRST, then this file.
+#
+#   # 1) torch for your hardware (pick one):
+#   pip install torch torchvision                                  # CPU / CUDA default
+#   #   or CUDA 12.x:  pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#   #   or ROCm:       pip install torch torchvision --index-url https://download.pytorch.org/whl/rocm6.x
+#
+#   # 2) inference deps + the zoo package:
+#   pip install -r requirements-inference.txt
+#   pip install .            # from the repo root -> `from zoo.predict import ...`
+#
+# Training (pretraining / fine-tuning) has heavier needs — see requirements.txt
+# (machine-specific, used on the training hosts) plus the `train` extra:
+#   pip install ".[train]"
+
+# --- inference runtime (torch/torchvision installed separately, above) ---
+numpy
+pillow
+huggingface_hub
+safetensors          # hub checkpoints ship as backbone.safetensors
+peft                 # LoRA adapter loading (zoo.peft)
+pyyaml               # dataset registry / configs
+pydantic             # manifest / lineage models
