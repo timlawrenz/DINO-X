@@ -11,9 +11,9 @@ Living workstream map — status tags: `[ACTIVE]`, `[CONCLUDED]`, `[TBD]`. Evide
   - LIDC specialist PASSES (AUROC 0.728) — ready for HF Hub.
   - Colon specialist FAILS (AUROC 0.6529) — needs new hypothesis before re-run.
   - Next: package hepatic-vessel + LIDC for HF Hub release.
-  - **Release-readiness gates defined (5-gate framework).** Hepatic-vessel v1: Gates 2 & 4 PASS; **Gate 1 (stupid-simple inference) CLOSED** via `zoo/predict.py` (`load_classifier` + `predict_proba`, trained −30/120 window baked in; verified on max395: real CRLM slices separate present 0.994 vs absent 0.068). Gate 3 (public repro) deferred to v1.1 (CRLM licensing). Gate 5 partial (citation TBD).
-  - **Public-flip blockers:** `zoo` not pip-installable (no pyproject), `requirements.txt` pins local ROCm wheel paths (hard-fails off the training machine), citation empty. See GitHub issue (pending).
-  - Git commit: `4e9571c` (zoo.predict one-liner)
+  - **Release-readiness gates defined (5-gate framework).** Hepatic-vessel v1: Gates 2 & 4 PASS; **Gate 1 (stupid-simple inference) CLOSED** via `zoo/predict.py` (`load_classifier` + `predict_proba`, trained −30/120 window baked in; verified on max395: real CRLM slices separate present 0.994 vs absent 0.068). Gate 3 (public repro) deferred to v1.1 (CRLM licensing). **Gate 5 PASS** (citation added, commit `2f4cf18`).
+  - **Public-flip blockers:** `zoo` not pip-installable (no pyproject), `requirements.txt` pins local ROCm wheel paths (hard-fails off the training machine). ~~citation empty~~ Citation CLOSED (commit `2f4cf18`: model + MSD NatComm + CRLM TCIA, DOIs verified). Gate 5 now PASS. See GitHub issue (pending).
+  - Git commit: `4e9571c` (zoo.predict one-liner), `2f4cf18` (citation)
 
 ## Concluded
 
