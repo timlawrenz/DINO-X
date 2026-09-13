@@ -24,6 +24,14 @@ Honest scope of this model. Where it is validated, where it is not.
    across the volume in 3D. The pretrained backbone used 3-slice context; the fine-tuned
    eval is single-slice (a documented distribution shift).
 
+   **Single-slice path is validated, not a shortcut.** The pretrained backbone learned
+   with 3-slice context `[z−1, z, z+1]`, while the released `predict_proba` duplicates a
+   single slice `[z, z, z]`. We measured the cost of this directly on the external CRLM
+   set (no retraining): true 3-slice context scored AUROC **0.94113** vs duplicated
+   **0.94130** (Δ = −0.0002, 17,639 slices). LoRA fine-tuning adapted the head to the
+   duplicated-slice distribution, so discarding spatial context costs nothing measurable
+   on this task. See `docs/EXPERIMENT_TREE.md` § 3-slice context ablation.
+
 4. **Internal metrics carry a pretraining-exposure caveat.** The internal 0.9456 was
    measured on fine-tuning patients the backbone had partly seen (93% of the fine-tune
    *validation* patients were in the pretraining corpus). Because pretraining used all
