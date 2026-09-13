@@ -6,6 +6,13 @@ Living workstream map — status tags: `[ACTIVE]`, `[CONCLUDED]`, `[TBD]`. Evide
 
 ## Active
 
+- **[ACTIVE] 3-Slice Context Ablation** (`abl-3slice-context`)
+  - **Question (from external review):** does feeding true adjacent-slice context `[z−1, z, z+1]` beat the shipped single-slice duplication `[z, z, z]` on the external CRLM task? The backbone was pretrained with 3-slice context but the released `predict_proba` + external eval both duplicate a single slice.
+  - **Pre-registered method:** same frozen backbone + LoRA + head (no retraining; patch_embed Conv2d(3→dim) untouched by LoRA). Recompute CRLM slice AUROC two ways on identical slices; boundary slices clamp to edge. `scripts/ablation_3slice_context.py`.
+  - **Gate (registered before seeing the full-set number):** if `ctx AUROC − dup AUROC > +0.01`, the duplication shortcut leaves meaningful accuracy on the table → document as a known limit + consider a 2.5D inference path. If `|Δ| ≤ 0.01`, duplication is empirically sufficient → document as a validated design choice. If `Δ < −0.01`, context actively hurts (distribution shift) → keep duplication, document why.
+  - **Debug-subset signal (500 slices, non-representative):** dup 0.9835 / ctx 0.9830 (Δ −0.0005) — suggests minimal gain. Full-set number pending.
+  - GPU lease: `dinox-3slice-abl-v1` (strix).
+
 - **[ACTIVE] Tier 1 Release Packaging** (`tier1-release-packaging`)
   - Hepatic-vessel specialist: internal AUROC 0.9456 + **external CRLM validation** (slice 0.9413, patient 0.739, 197 new patients) — release-ready.
   - LIDC specialist PASSES (AUROC 0.728) — ready for HF Hub.

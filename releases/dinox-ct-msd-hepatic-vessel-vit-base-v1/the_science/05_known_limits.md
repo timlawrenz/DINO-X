@@ -32,6 +32,17 @@ Honest scope of this model. Where it is validated, where it is not.
    test) are reported for transparency only; the *external* CRLM 0.9413 is the
    release-supporting number. Do not cite internal-only numbers as generalization.
 
+   **Same-dataset design (stated plainly).** This is a single-organ *specialist*: the
+   backbone was self-supervised on MSD Hepatic-Vessel and the LoRA task head was then
+   fine-tuned on labeled slices from the *same* MSD Hepatic-Vessel dataset. That is
+   intentional — the design goal is organ-specific feature quality, not cross-dataset
+   pretraining diversity — but it means the task head was optimized on data distribution
+   the backbone was exposed to during pretraining. The defense against this being a
+   memorization artifact is the **external CRLM evaluation**: a different institution,
+   different scanners, zero patient overlap, where the model still achieves 0.9413. If
+   you need a model whose fine-tuning distribution is disjoint from pretraining, this is
+   not that model.
+
 5. **Single acquisition protocol lineage.** Both MSD and CRLM are contrast-enhanced
    abdominal CT. Non-contrast CT, unusual HU windows, or norm windowing may degrade
    performance. We applied a narrow soft-tissue/vascular window (level −30, width 120,
