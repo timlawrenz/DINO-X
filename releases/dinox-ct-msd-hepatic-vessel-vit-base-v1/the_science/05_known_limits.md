@@ -24,15 +24,19 @@ Honest scope of this model. Where it is validated, where it is not.
    across the volume in 3D. The pretrained backbone used 3-slice context; the fine-tuned
    eval is single-slice (a documented distribution shift).
 
-4. **Internal AUROC carries leakage caveat.** The internal 0.9456 was measured on fine-tuning
-   patients the backbone had partly seen. It is reported for transparency; the *external*
-   0.9413 is the release-supporting number. Do not cite internal-only numbers as
-   generalization.
+4. **Internal metrics carry a pretraining-exposure caveat.** The internal 0.9456 was
+   measured on fine-tuning patients the backbone had partly seen (93% of the fine-tune
+   *validation* patients were in the pretraining corpus). Because pretraining used all
+   48,021 MSD Hepatic-Vessel slices, **the internal test set (47 patients) was likewise
+   entirely present** in the self-supervised pretraining data. Internal numbers (val and
+   test) are reported for transparency only; the *external* CRLM 0.9413 is the
+   release-supporting number. Do not cite internal-only numbers as generalization.
 
 5. **Single acquisition protocol lineage.** Both MSD and CRLM are contrast-enhanced
    abdominal CT. Non-contrast CT, unusual HU windows, or norm windowing may degrade
-   performance. We applied a lung window (level -30, width 120) to match pretraining;
-   this may not be optimal for all downstream tasks.
+   performance. We applied a narrow soft-tissue/vascular window (level −30, width 120,
+   i.e. the [−90, +30] HU range) to match pretraining; this may not be optimal for all
+   downstream tasks.
 
 6. **No calibrated probabilities / no uncertainty.** Outputs are softmax probabilities
    without temperature scaling or MC-Dropout uncertainty. For any calibrated-confidence

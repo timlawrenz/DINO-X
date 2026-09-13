@@ -29,9 +29,18 @@ for slice-level vessel-present classification.
 | Pretraining | DINO self-supervised, single-organ MSD Hepatic-Vessel, 50K steps |
 | Fine-tuning | LoRA (rank 8, alpha 16) on vessel-present binary labels |
 | Internal AUROC | 0.9456 *(leakage-caveated, not release-supporting)* |
-| **External AUROC (TCIA CRLM)** | **0.9413** slice-level / **0.739** patient-level, 197 patients |
+| **External slice AUROC (TCIA CRLM)** | **0.9413** slice-level, 17,639 slices / 197 patients |
+| External Spearman (vessel-fraction vs score) | r_s = 0.527, p ≈ 1.8e-15 |
 | Input | `hu16_png` 16-bit HU slices, windowing level −30 / width 120, 224px |
 | License | Apache-2.0 |
+
+> **Why slice-level, not patient-level, is the headline:** the external set has 196
+> vessel-positive patients and only 1 all-negative patient, so a *patient-level* ROC-AUC
+> is computed against a single negative — statistically degenerate (one ranking shift of
+> that patient swings it wildly). We report the patient-level majority-vote AUROC (0.739)
+> in `the_science/03_validation.md` for completeness, but the defensible headline
+> generalization metrics are the slice-level AUROC (0.9413) and the Spearman correlation
+> (0.527), which are robust to the class split.
 
 ## Intended use
 Slice-level detection of hepatic/portal vessel tissue in contrast-enhanced abdominal
@@ -40,9 +49,15 @@ diagnosis or treatment planning.
 
 ## How to use the model
 
+> **⚠️ Compatibility:** this model uses a custom **scale-aware** architecture and is
+> served through the `zoo` inference package (`library_name: dinox-zoo`). It **cannot**
+> be loaded with standard `transformers.AutoModel` / `AutoModelForImageClassification` —
+> there is no unified `model.safetensors` and `transformers` does not implement the
+> `ScaleEmbedding` spacing logic. Use the `zoo` path below.
+
 The release ships as **weights-only** — the inference harness is the open-source
-[`zoo`](https://github.com/timlawrenz/DINO-X) package (this repo's codebase). This
-card's numbers were produced by exactly this path.
+[`zoo`](https://github.com/timlawrenz/DINO-X) package. This card's numbers were
+produced by exactly this path.
 
 ### Quick start (the one-liner)
 
@@ -58,8 +73,13 @@ p = predict_proba(clf, hu_slice, pixel_spacing=(0.77, 0.77), slice_thickness=1.5
 print(p)   # P(vessel present) in [0, 1]
 ```
 
-`hu_slice` is a `(H, W)` numpy array in Hounsfield Units (e.g. a DICOM after
-rescale slope/intercept). Output is a raw softmax probability — this model ships
+`hu_slice` is a single `(H, W)` numpy array in Hounsfield Units (e.g. a DICOM after
+rescale slope/intercept). `predict_proba` internally replicates it to the backbone's 3
+input channels — the released classifier path is **single-slice** (the channel dim is a
+copy, not spatial neighbors). The pretrained *backbone* was trained with 3-slice context
+(z−1, z, z+1); if you load the backbone directly for a multi-slice downstream task, pass
+3 genuine adjacent slices rather than a duplicated slice (see Known Limitations §3).
+Output is a raw softmax probability — this model ships
 **without calibration or uncertainty** (see Limitations).
 
 ### Requirements
@@ -105,9 +125,11 @@ for backbone features). The external-eval label rows look like:
 ```
 
 For 16-bit PNG inputs (the training `input_format`), pass
-`input_format="hu16_png"` to `predict_proba`; it applies the same
-`HU = (uint16 - 32768) * 0.1` decode then the trained window. The `hu_float`
-and `hu16_png` paths agree to within float rounding.
+`input_format="hu16_png"` to `predict_proba`. The stored 16-bit encoding is
+`uint16 = round(HU * 10) + 32768` (one decimal of HU precision, HU range
+≈ [−3276.8, +3276.7]); the decode is `HU = (uint16 − 32768) * 0.1`. This is the
+encoding of the shipped training/eval PNGs — verified against the on-disk bytes.
+The `hu_float` and `hu16_png` paths agree to within float rounding.
 
 ### Validate the load (recommended)
 

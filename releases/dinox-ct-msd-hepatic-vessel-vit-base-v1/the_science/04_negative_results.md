@@ -40,8 +40,9 @@ to gate specialists **solely on clinical utility (LoRA AUROC) + external validat
 **Attempt:** Apply the same organ-specialist recipe to MSD-Colon.
 
 **Outcome:** LoRA AUROC **0.6529** — below the 0.70 gate, unstable training (AUROC
-oscillated 0.58–0.65). Possible causes: small dataset (126 patients), a lung-tuned HU
-window applied to colon, or colon texture being less distinctive for the scale-aware
+oscillated 0.58–0.65). Possible causes: small dataset (126 patients), a narrow
+soft-tissue/vascular HU window (level −30, width 120) tuned for hepatic vessels
+applied to colon, or colon texture being less distinctive for the scale-aware
 ViT-Base. Not yet re-investigated.
 
 **Why it matters:** honest boundary of the recipe — not every organ is equally
