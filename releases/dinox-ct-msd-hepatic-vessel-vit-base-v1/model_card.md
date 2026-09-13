@@ -148,4 +148,48 @@ mechanically:
 - Internal AUROC has a pretraining-leakage caveat — cite the external number.
 
 ## Citation
-*(to add)*
+
+If you use this model, please cite the model, the training dataset (MSD Hepatic
+Vessel), and the external validation dataset (TCIA CRLM):
+
+**This model**
+```bibtex
+@misc{lawrenz2026dinox_hepatic_vessel_v1,
+  title   = {dinox-ct-msd-hepatic-vessel-vit-base-v1: Scale-aware ViT-Base specialist
+             for hepatic vessel detection in abdominal CT (DINO-X model zoo)},
+  author  = {Lawrenz, Tim},
+  year    = {2026},
+  howpublished = {\url{https://huggingface.co/timlawrenz/dinox-ct-msd-hepatic-vessel-vit-base-v1}},
+  note    = {Release with evidence envelope: external AUROC 0.9413 (TCIA CRLM, 197 patients)}
+}
+```
+
+**Training data — Medical Segmentation Decathlon (Task 08: Hepatic Vessels)**
+```bibtex
+@article{antonelli2022msd,
+  title   = {The Medical Segmentation Decathlon},
+  author  = {Antonelli, Michela and Reinke, Annika and Bakas, Spyridon and Farahani, Keyvan
+             and Kopp-Schneider, Annette and Landman, Bennett A. and Litjens, Geert and
+             Menze, Bjoern and Ronneberger, Olaf and Summers, Ronald M. and others},
+  journal = {Nature Communications},
+  year    = {2022},
+  volume  = {13},
+  pages   = {4128},
+  doi     = {10.1038/s41467-022-30695-9},
+  note    = {arXiv:2106.05735}
+}
+```
+
+**External validation data — TCIA Colorectal-Liver-Metastases**
+```bibtex
+@misc{simpson2023crlm,
+  title   = {Preoperative CT and Survival Data for Patients Undergoing Resection of
+             Colorectal Liver Metastases (Colorectal-Liver-Metastases) (Version 2) [Data set]},
+  author  = {Simpson, Amber L. and Peoples, Jacob and Creasy, John M. and Fichtinger, Gabor
+             and Gangai, Natalie and Lasso, Andras and Keshava Murthy, Keshava N. and
+             Shia, Jinru and D'Angelica, Michael I. and Do, Richard K. G.},
+  year    = {2023},
+  publisher = {The Cancer Imaging Archive},
+  doi     = {10.7937/QXK2-QG03}
+}
+```
