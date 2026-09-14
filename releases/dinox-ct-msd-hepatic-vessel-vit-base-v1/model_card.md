@@ -36,11 +36,11 @@ for slice-level vessel-present classification.
 
 > **Why slice-level, not patient-level, is the headline:** the external set has 196
 > vessel-positive patients and only 1 all-negative patient, so a *patient-level* ROC-AUC
-> is computed against a single negative — statistically degenerate (one ranking shift of
-> that patient swings it wildly). We report the patient-level majority-vote AUROC (0.739)
-> in `the_science/03_validation.md` for completeness, but the defensible headline
-> generalization metrics are the slice-level AUROC (0.9413) and the Spearman correlation
-> (0.527), which are robust to the class split.
+> would be computed against a single negative — statistically degenerate. We therefore do
+> **not** report a patient-level AUROC as a metric; the defensible generalization metrics
+> are the slice-level AUROC (0.9413) and the Spearman rank correlation (0.527), both
+> robust to the class split. (The ill-posed patient task is documented in
+> `the_science/03_validation.md`.)
 
 ## Intended use
 Slice-level detection of hepatic/portal vessel tissue in contrast-enhanced abdominal

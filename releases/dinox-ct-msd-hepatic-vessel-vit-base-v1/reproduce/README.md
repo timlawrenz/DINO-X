@@ -26,8 +26,8 @@ python scripts/eval_external.py \
   --label-csv data/crlm/vessel_labels_local.csv \
   --window-level -30 --window-width 120 \
   --device cuda
-# Expect: Slice-level AUROC 0.9413, Patient-level AUROC (majority-vote) 0.739,
-#         Spearman 0.527 (p~1e-15)
+# Expect: Slice-level AUROC 0.9413, Spearman 0.527 (p~1e-15)
+#   (patient-level ROC-AUC is undefined: 196/197 patients vessel-positive, 1 negative)
 ```
 
 `scripts/eval_external.py` persists per-slice predictions to

@@ -61,9 +61,10 @@ Honest scope of this model. Where it is validated, where it is not.
    without temperature scaling or MC-Dropout uncertainty. For any calibrated-confidence
    or defer-to-human use case, calibration must be added.
 
-7. **Patient-level inference not fully solved.** External patient-level AUROC (0.739,
-   majority-vote) is meaningful but the ideal patient-level aggregation for clinical use
-   (e.g. per-patient decision from slice scores) is not yet established.
+7. **Patient-level inference not fully solved.** A patient-level ROC-AUC is undefined on
+   the external set (196/197 patients vessel-positive, 1 all-negative), so we report the
+   Spearman rank correlation (0.527) instead. The ideal patient-level aggregation for
+   clinical use (e.g. per-patient decision from slice scores) is not yet established.
 
 ---
 

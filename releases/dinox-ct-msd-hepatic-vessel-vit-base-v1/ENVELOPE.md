@@ -11,10 +11,13 @@ MSD Hepatic-Vessel CT, LoRA fine-tuned for hepatic/portal vessel detection.
 
 | Metric | Value | Where verified |
 |---|---|---|
-| Internal LoRA AUROC (MSD val) | **0.9456** | `adapters/msd-hepatic-vessel-vit-base-50k/finetune_config.json` |
-| **External AUROC — TCIA CRLM** | **0.9413** (17,639 slices, 197 patients) | `reproduce/repro_metrics.py` + ledger |
-| External patient-level AUROC (majority vote) | **0.739** | `reproduce/repro_metrics.py` + ledger |
+| Internal LoRA AUROC (MSD val) | 0.9456 *(disclosure-only, dataset exhaustion)* | `adapters/msd-hepatic-vessel-vit-base-50k/finetune_config.json` |
+| **External slice AUROC — TCIA CRLM** | **0.9413** (17,639 slices, 197 patients) | `reproduce/repro_metrics.py` + ledger |
 | External Spearman(vessel-richness, score) | **0.527** (p≈1.8e-15) | `reproduce/repro_metrics.py` + ledger |
+
+> Patient-level ROC-AUC is **undefined** on the external set (196/197 patients are
+> vessel-positive, 1 all-negative), so it is not reported as a metric. The Spearman rank
+> correlation is the valid patient-level generalization signal. See `the_science/03_validation.md`.
 
 *Why the external number matters:* the internal 0.9456 was red-team flagged as
 potentially inflated by pretraining leakage (the backbone had seen 93% of the

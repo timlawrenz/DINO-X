@@ -14,6 +14,14 @@ Living workstream map — status tags: `[ACTIVE]`, `[CONCLUDED]`, `[TBD]`. Evide
   - Script: `scripts/ablation_3slice_context.py`; result: `results/ablation_3slice_context.json`; GPU lease `dinox-3slice-abl-v1` (released).
   - Git commit: pending
 
+- **[CONCLUDED — GO] Frozen-Backbone Window-Robustness Probe** (`abl-frozen-probe`)
+  - **Question (3rd external review):** is the narrow −30/120 fine-tune window a "massive domain shift" the frozen backbone can't interpret, making LoRA "structurally questionable"?
+  - **Method:** frozen scale-aware backbone, **no LoRA**, −30/120 window, external CRLM. Patient-grouped split (137 train / 60 test patients), linear probe on CLS features. Null = raw-intensity probe.
+  - **Result:** frozen backbone alone AUROC **0.9068** vs null 0.4467. The backbone's features are window-robust WITHOUT adaptation; LoRA+head lifts it to 0.9413.
+  - **Verdict:** reviewer's structural claim REFUTED by data. The narrow window is not a blocker. This is the strongest evidence the model is not a preprocessing artifact.
+  - Script: `scripts/ablation_frozen_probe.py`; result: `results/ablation_frozen_probe.json`; lease `dinox-frozen-probe-v1` (released).
+  - Git commit: pending
+
 - **[ACTIVE] Tier 1 Release Packaging** (`tier1-release-packaging`)
   - Hepatic-vessel specialist: internal AUROC 0.9456 + **external CRLM validation** (slice 0.9413, patient 0.739, 197 new patients) — release-ready.
   - LIDC specialist PASSES (AUROC 0.728) — ready for HF Hub.

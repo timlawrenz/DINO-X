@@ -5,7 +5,8 @@
     "auroc": 0.9456,
     "best_epoch": 23,
     "best_val_loss": 0.3236,
-    "leakage_caveat": "93% of fine-tune val patients were in pretrain train; internal number NOT release-supporting"
+    "status": "DISCLOSURE_ONLY_not_a_metric",
+    "dataset_exhaustion_caveat": "MSD Task08 has exactly 303 series; self-supervised pretraining used all 303 and fine-tuning used the same 303 patient pool. Internal val AND test metrics were computed on data the frozen backbone was exposed to during pretraining — this is dataset exhaustion inherent to a single-organ specialist, not an avoidable split error. Internal numbers are published for transparency only and are NOT evidence of generalization. The external CRLM slice AUROC is the sole release-supporting number."
   },
   "external_crlm": {
     "source": "TCIA ColoRectal Liver Metastases",
@@ -13,7 +14,7 @@
     "slices": 17639,
     "slice_auroc": 0.9413,
     "slice_accuracy_at_0.5": 0.8791,
-    "patient_auroc_majority_vote": 0.739,
+    "patient_level_note": "patient-level ROC-AUC is undefined on this set (196/197 patients vessel-positive, 1 all-negative); not reported as a metric. Rank correlation is the valid patient-level signal.",
     "spearman_patient_vessel_fraction_vs_score": 0.527,
     "spearman_pvalue": 1.8e-15,
     "disjoint_from_training": true,

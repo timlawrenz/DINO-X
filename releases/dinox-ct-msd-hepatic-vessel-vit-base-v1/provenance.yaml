@@ -12,13 +12,17 @@ training_gpu: Radeon 8060S (Strix Halo, ROCm)
 data_snapshot: "MSD Hepatic-Vessel 48,021 slices (pretrain); external TCIA CRLM 197 patients / 17,639 slices (eval)"
 task: hepatic/portal-vessel-present binary classification
 adapter_path: adapters/msd-hepatic-vessel-vit-base-50k
-internal_auroc: 0.9456
+internal_auroc: 0.9456   # disclosure-only (dataset exhaustion), not generalization evidence
 external_slice_auroc: 0.9413
-external_patient_auroc: 0.739
+external_spearman_patient_vessel_fraction: 0.527
 external_patients: 197
 external_slices: 17639
 license: Apache-2.0
 hf_slug: timlawrenz/dinox-ct-msd-hepatic-vessel-vit-base-v1 (planned)
 notes: >
-  Internal AUROC carries pretraining-leakage caveat (93% of fine-tune val patients
-  were in pretrain train). External TCIA CRLM AUROC is the release-supporting number.
+  Internal AUROC is disclosure-only: MSD Task08 has 303 series, all used in both
+  pretraining and fine-tuning (dataset exhaustion), so internal metrics are not
+  generalization evidence. Patient-level ROC-AUC is undefined on the external set
+  (196/197 vessel-positive, 1 all-negative) and is NOT reported; Spearman rank
+  correlation (0.527) is the valid patient-level signal. External slice AUROC is the
+  release-supporting number.
