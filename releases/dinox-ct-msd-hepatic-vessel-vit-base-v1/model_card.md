@@ -43,8 +43,10 @@ for slice-level vessel-present classification.
 > `the_science/03_validation.md`.)
 
 ## Intended use
-Slice-level detection of hepatic/portal vessel tissue in contrast-enhanced abdominal
-CT, for research (backbone feature extraction, downstream fine-tuning). **Not** for
+The primary value of this release is the **pretrained scale-aware backbone** for
+downstream tasks (feature extraction, fine-tuning to segmentation/regression). The shipped
+vessel-present classifier is a **proof-of-representation** artifact demonstrating the
+backbone encodes real vessel-tissue signal (external slice AUROC 0.9413). **Not** for
 diagnosis or treatment planning.
 
 ## How to use the model
@@ -76,9 +78,11 @@ print(p)   # P(vessel present) in [0, 1]
 `hu_slice` is a single `(H, W)` numpy array in Hounsfield Units (e.g. a DICOM after
 rescale slope/intercept). `predict_proba` internally replicates it to the backbone's 3
 input channels — the released classifier path is **single-slice** (the channel dim is a
-copy, not spatial neighbors). The pretrained *backbone* was trained with 3-slice context
-(z−1, z, z+1); if you load the backbone directly for a multi-slice downstream task, pass
-3 genuine adjacent slices rather than a duplicated slice (see Known Limitations §3).
+copy). We measured the cost of this directly on the external set: true 3-slice context
+`[z−1,z,z+1]` scored AUROC 0.94113 vs the duplicated single slice 0.94130 (Δ = −0.0002,
+17,639 slices) — collapsing the z-axis costs nothing measurable here. If you load the
+*backbone* alone for a multi-slice downstream task, pass 3 genuine adjacent slices.
+
 Output is a raw softmax probability — this model ships
 **without calibration or uncertainty** (see Limitations).
 
@@ -102,18 +106,48 @@ pip install .            # makes `from zoo.predict import ...` importable
 
 ### Under the hood (what `load_classifier` does for you)
 
-You don't need this to use the model — it's here so the load is transparent.
-`load_classifier` assembles three artifacts from this repo in the correct order:
+You don't need this to use the model — it's here so the load is transparent. The
+release ships a **merged backbone** (`backbone_merged.safetensors` — the LoRA adapter
+folded into the base weights at release time), so inference needs **no `peft`** and the
+LoRA double-wrap footgun is structurally impossible:
 
 ```python
-# (a) frozen scale-aware ViT-Base backbone from config.json + backbone.safetensors
-# (b) LoRA adapter (rank 8, alpha 16) injected via PeftModel.from_pretrained
+# (a) merged scale-aware ViT-Base backbone (config.json + backbone_merged.safetensors)
 # (c) task head (nn.Linear 768 -> 2) loaded from head.pth
 ```
 
+(The unmerged `backbone.safetensors` + `adapter_model.safetensors` remain in the repo
+for provenance; `load_classifier` prefers the merged file and only falls back to the
+adapter if the merged file is absent. If you use the unmerged path directly, do **not**
+call `apply_lora()` on top of `load_adapter` — that double-wraps the backbone.)
+
 It reads the trained HU window and `num_classes` from `finetune_config.json` so
-preprocessing always matches training. **Do not** call a separate `apply_lora()`
-on top — that double-wraps the backbone and silently scores with a random LoRA.
+preprocessing always matches training.
+
+### Operating range of the scale embedding
+
+The backbone is scale-aware: it ingests `(spacing_x, spacing_y, slice_thickness)` from
+your DICOM header through a `ScaleEmbedding` MLP. The **training spacing manifold**
+(from `data_catalog.md`) was:
+
+- in-plane `spacing_x/y`: **0.57–0.98 mm** (mean 0.80)
+- `slice_thickness`: **0.8–8.0 mm** (mean 3.28)
+
+Inputs within that range are handled smoothly; inputs **outside** it (e.g. spacing
+1.5 mm, or a 0.5 mm high-resolution slice) are out-of-distribution for the scale
+embedding — the model still returns a value, but correctness is not validated there.
+Pass the true DICOM spacing; do not assume it interpolates arbitrary scales.
+
+### Reproducing from TCIA DICOMs
+
+The external eval's `vessel_labels.csv` points at `hu16_png` files. To regenerate them
+from raw TCIA CRLM DICOMs, use the repo's preprocessing script
+(`scripts/preprocessing/phase2_preprocess_nifti.py` for NIfTI, or the CRLM label
+extractor `scripts/preprocessing/extract_crlm_vessel_labels.py` that maps SEG → per-slice
+labels over the CT). The canonical encoding is `u16 = round(HU*10) + 32768` (see
+`docs/DATA_SOURCES.md`). Without this step, `reproduce/repro_metrics.py` cannot run —
+this is the documented v1 caveat (full public repro lands in v1.1 once CRLM licensing
+is resolved).
 
 ### Batch inference & the external-eval label format
 

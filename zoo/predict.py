@@ -137,15 +137,12 @@ def load_classifier(
 ) -> DinoXClassifier:
     """Load a released DINO-X specialist as a ready-to-use classifier.
 
-    Assembles backbone + LoRA adapter + task head from a HuggingFace Hub model
-    ID or a local hub-format directory, freezes everything, sets eval mode, and
-    reads the exact preprocessing the model was trained with.
+    Prefers the merged backbone (``backbone_merged.safetensors`` — LoRA folded in)
+    so inference needs NO ``peft`` and the LoRA double-wrap footgun is gone. Falls
+    back to backbone+LoRA if only the unmerged artifacts exist.
 
     Args:
-        model_id_or_path: HF Hub model ID (``timlawrenz/dinox-...``) or a local
-            directory containing ``config.json``, ``backbone.safetensors``,
-            ``adapter_config.json``, ``adapter_model.safetensors``, ``head.pth``,
-            and ``finetune_config.json``.
+        model_id_or_path: HF Hub model ID or a local hub-format directory.
         device: Target device. Defaults to CUDA if available else CPU.
 
     Returns:
@@ -155,7 +152,6 @@ def load_classifier(
         device = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device)
 
-    # Resolve a local dir so we can read the sibling files (head, adapter, ft cfg).
     p = Path(model_id_or_path)
     if p.is_dir():
         local_dir = p
@@ -164,14 +160,22 @@ def load_classifier(
 
         local_dir = Path(snapshot_download(model_id_or_path))
 
-    # (1) backbone
-    backbone = load_model(str(local_dir), device=device)
+    merged_path = local_dir / "backbone_merged.safetensors"
+    if merged_path.exists():
+        # Merged path: plain PatchViT, no peft. Load backbone then swap weights.
+        from safetensors.torch import load_file as _st_load
+        from zoo.hub import _build_backbone as _build
 
-    # (2) LoRA adapter — the ONLY wrap. Do not apply_lora() anywhere else.
-    from zoo.peft import load_adapter
+        cfg = json.loads((local_dir / "config.json").read_text())
+        backbone = _build(cfg)
+        backbone.load_state_dict(_st_load(str(merged_path), device="cpu"))
+        backbone = backbone.to(device).eval()
+    else:
+        backbone = load_model(str(local_dir), device=device)
+        from zoo.peft import load_adapter
 
-    backbone = load_adapter(backbone, local_dir)
-    backbone = backbone.to(device).eval()
+        backbone = load_adapter(backbone, local_dir)
+        backbone = backbone.to(device).eval()
 
     # (3) task head, reading dims defensively from the unwrapped base
     ft = json.loads((local_dir / "finetune_config.json").read_text())
